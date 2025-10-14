@@ -92,3 +92,74 @@ class GenomeFormat(Enum):
                 return extension_map[ext]
         
         raise ValueError(f"'{value}' is not a valid {cls.__name__}")
+
+
+class ReadFormat(Enum):
+    FASTQ = "fastq"
+    BAM = "bam"
+    
+    @classmethod
+    def _missing_(cls, value):
+        """
+        Handle ReadFormat('fastq'), ReadFormat('.fq'), ReadFormat('file.fastq')
+        """
+        value_lower = str(value).lower().strip()
+        
+        # Remove leading dot
+        if value_lower.startswith('.'):
+            value_lower = value_lower[1:]
+        
+        # Extension mapping
+        extension_map = {
+            'fq': cls.FASTQ,
+            'fastq': cls.FASTQ,
+            'bam': cls.BAM,
+        }
+        
+        # Direct match
+        if value_lower in extension_map:
+            return extension_map[value_lower]
+        
+        # If it looks like a filename, extract extension
+        if '.' in value_lower:
+            ext = Path(value).suffix.lower()[1:]  # Remove dot
+            if ext in extension_map:
+                return extension_map[ext]
+        
+        raise ValueError(f"'{value}' is not a valid {cls.__name__}")
+
+
+class FeatureFormat(Enum):
+    GFF = "gff"
+    BED = "bed"
+    
+    @classmethod
+    def _missing_(cls, value):
+        """
+        Handle ReadFormat('bed'), ReadFormat('.gtf'), ReadFormat('file.gff')
+        """
+        value_lower = str(value).lower().strip()
+        
+        # Remove leading dot
+        if value_lower.startswith('.'):
+            value_lower = value_lower[1:]
+        
+        # Extension mapping
+        extension_map = {
+            'gff3': cls.GFF,
+            'gtf': cls.GFF,
+            'gff2': cls.GFF,
+            'bed': cls.BED,
+        }
+        
+        # Direct match
+        if value_lower in extension_map:
+            return extension_map[value_lower]
+        
+        # If it looks like a filename, extract extension
+        if '.' in value_lower:
+            ext = Path(value).suffix.lower()[1:]  # Remove dot
+            if ext in extension_map:
+                return extension_map[ext]
+        
+        raise ValueError(f"'{value}' is not a valid {cls.__name__}")

@@ -1,5 +1,12 @@
 """
-Configuration and Coordinator classes for bioinformatics file validation.
+Configuration and ConfigManager classes for bioinformatics file validation.
+
+Contains:
+- GenomeConfig, ReadConfig, FeatureConfig: Dataclasses for file configurations
+- Config: Main configuration container
+- ConfigManager: Configuration file parser and validator
+
+Note: ConfigManager class may be renamed to ConfigManager in future.
 """
 
 import json
@@ -8,13 +15,12 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
 # Import logging and exceptions
-from validation_pkg.utils.formats import CodingType,GenomeFormat
+from validation_pkg.utils.formats import CodingType,GenomeFormat,ReadFormat,FeatureFormat
 from validation_pkg.logger import get_logger
 from validation_pkg.exceptions import (
     ConfigurationError,
     FileNotFoundError as ValidationFileNotFoundError
 )
-
 
 
 @dataclass
@@ -35,20 +41,16 @@ class GenomeConfig:
 @dataclass
 class ReadConfig:
     """Configuration for read files."""
-    filename: Optional[str] = None  # Original relative filename
-    directory: Optional[str] = None  # Original relative directory
-    filepath: Optional[Path] = None  # Absolute resolved path (for file)
-    dirpath: Optional[Path] = None  # Absolute resolved path (for directory)
+    filename: str  # Original filename
+    filepath: Path  # Absolute resolved path
     ngs_type: str = "illumina"  # "illumina", "ont", "pacbio"
-    
+    coding_type: CodingType = None  # Coding type applied on file
+    detected_format: ReadFormat = None  # Read file format
+
     # Store any additional keys from config
     extra: Dict[str, Any] = None
-    
+
     def __post_init__(self):
-        if self.filename is None and self.directory is None:
-            raise ValueError("Either filename or directory must be provided")
-        if self.filename and self.directory:
-            raise ValueError("Provide either filename or directory, not both")
         if self.ngs_type not in ["illumina", "ont", "pacbio"]:
             raise ValueError(f"Invalid ngs_type: {self.ngs_type}")
         if self.extra is None:
@@ -59,6 +61,8 @@ class FeatureConfig:
     """Configuration for feature files."""
     filename: str  # Original relative filename
     filepath: Path  # Absolute resolved path
+    coding_type: CodingType  # Coding type applied on file
+    detected_format: FeatureFormat   # Genome file format
     
     # Store any additional keys from config
     extra: Dict[str, Any] = None
@@ -121,10 +125,12 @@ class Config:
         )
 
 
-class Coordinator:
+class ConfigManager:
     """
     Reads and validates configuration files.
     Responsible for parsing JSON and validating keys/values.
+
+    Note: May be renamed to ConfigManager in future.
     """
     
     @staticmethod
@@ -178,19 +184,19 @@ class Coordinator:
         try:
             # Validate and parse
             logger.debug("Validating configuration structure...")
-            Coordinator._validate_required_fields(data)
+            ConfigManager._validate_required_fields(data)
             logger.debug("Parsing genome configurations...")
-            Coordinator._parse_genome_configs(data, config)
+            ConfigManager._parse_genome_configs(data, config)
             logger.debug("Parsing read configurations...")
-            Coordinator._parse_read_configs(data, config)
+            ConfigManager._parse_read_configs(data, config)
             logger.debug("Parsing feature configurations...")
-            Coordinator._parse_feature_configs(data, config)
+            ConfigManager._parse_feature_configs(data, config)
             logger.debug("Parsing options...")
-            Coordinator._parse_options(data, config)
+            ConfigManager._parse_options(data, config)
             logger.debug("Validating file existence...")
-            Coordinator._validate_file_existence(config)
+            ConfigManager._validate_file_existence(config)
             logger.debug("Setting up output directory...")
-            Coordinator._setup_output_directory(config)
+            ConfigManager._setup_output_directory(config)
 
             logger.info("✓ Configuration loaded and validated successfully")
             return config
@@ -200,8 +206,6 @@ class Coordinator:
             logger.error(error_msg)
             raise ConfigurationError(error_msg) from e
         
-        
-        return config
     
     @staticmethod
     def _validate_required_fields(data: dict):
@@ -220,36 +224,43 @@ class Coordinator:
     def _parse_genome_configs(data: dict, config: Config):
         """Parse genome and plasmid configurations."""
         # Required genomes
-        config.ref_genome = Coordinator._parse_genome_config(
+        config.ref_genome = ConfigManager._parse_genome_config(
             data['ref_genome_filename'], 'ref_genome_filename', config.config_dir
         )
-        config.mod_genome = Coordinator._parse_genome_config(
+        config.mod_genome = ConfigManager._parse_genome_config(
             data['mod_genome_filename'], 'mod_genome_filename', config.config_dir
         )
         
         # Optional plasmids
         if 'ref_plasmid_filename' in data and data['ref_plasmid_filename']:
-            config.ref_plasmid = Coordinator._parse_genome_config(
+            config.ref_plasmid = ConfigManager._parse_genome_config(
                 data['ref_plasmid_filename'], 'ref_plasmid_filename', config.config_dir
             )
         
         if 'mod_plasmid_filename' in data and data['mod_plasmid_filename']:
-            config.mod_plasmid = Coordinator._parse_genome_config(
+            config.mod_plasmid = ConfigManager._parse_genome_config(
                 data['mod_plasmid_filename'], 'mod_plasmid_filename', config.config_dir
             )
     
     @staticmethod
     def _parse_genome_config(value: Any, field_name: str, config_dir: Path) -> GenomeConfig:
         """Parse a single genome config entry and resolve paths."""
-       
-        extra = {}  
+        logger = get_logger()
+
+        extra = {}
         if isinstance(value, dict):
             if 'filename' not in value:
                 raise ValueError(f"{field_name} must contain 'filename' field")
             filename = value['filename']
-            
+
             # Store any extra keys
-            extra = {k: v for k, v in value.items() if k not in ['filename']}   
+            extra = {k: v for k, v in value.items() if k not in ['filename']}
+
+            # Warn about extra fields that won't be used
+            if extra:
+                logger.warning(
+                    f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
+                )
         elif isinstance(value, str):
             # Accept plain string for backwards compatibility
             filename = value
@@ -258,47 +269,79 @@ class Coordinator:
 
         # Resolve absolute path and filename
         filepath = config_dir / filename
-        filename = filepath.name    #   include extension
+        filename = filepath.name
         exts = filepath.suffixes
+
+        # Determine coding type (compression) from extensions
+        # If file has multiple extensions like .fasta.gz, the last one is compression
+        coding_str = exts[-1][1:] if len(exts) > 1 else ''  # Remove leading dot
+        coding_type = CodingType(coding_str) if coding_str else CodingType('')
+
+        # Determine format from first extension (e.g., .fasta, .fa, .gb)
+        format_str = exts[0] if exts else ''
+        detected_format = GenomeFormat(format_str)
 
         return GenomeConfig(
             filename=filename,
             filepath=filepath,
-            coding_type=CodingType('.'.join(exts[1:])),
-            detected_format=GenomeFormat(exts[0]),
+            coding_type=coding_type,
+            detected_format=detected_format,
             extra=extra)
     
     @staticmethod
     def _parse_read_configs(data: dict, config: Config):
         """Parse reads configuration."""
+        logger = get_logger()
         reads_data = data['reads']
-        
+
         if not isinstance(reads_data, list):
             raise ValueError("'reads' must be a list")
-        
+
         for idx, read_entry in enumerate(reads_data):
             if not isinstance(read_entry, dict):
                 raise ValueError(f"reads[{idx}] must be a dict")
-            
+
             try:
-                filename = read_entry.get('filename')
-                directory = read_entry.get('directory')
+                # Get filename - can be string or dict
+                if isinstance(read_entry.get('filename'), dict):
+                    filename = read_entry['filename'].get('filename')
+                else:
+                    filename = read_entry.get('filename')
+
+                if not filename:
+                    raise ValueError("'filename' field is required")
+
                 ngs_type = read_entry.get('ngs_type', 'illumina')
-                
+
                 # Extract extra keys
-                extra = {k: v for k, v in read_entry.items() 
-                        if k not in ['filename', 'directory', 'ngs_type']}
-                
-                # Resolve paths
-                filepath = config.config_dir / filename if filename else None
-                dirpath = config.config_dir / directory if directory else None
-                
+                extra = {k: v for k, v in read_entry.items()
+                        if k not in ['filename', 'ngs_type']}
+
+                # Warn about extra fields
+                if extra:
+                    logger.warning(
+                        f"reads[{idx}]: Found extra fields that will be ignored: {list(extra.keys())}"
+                    )
+
+                # Resolve absolute path and filename
+                filepath = config.config_dir / filename
+                filename = filepath.name
+                exts = filepath.suffixes
+
+                # Determine coding type (compression) from extensions
+                coding_str = exts[-1][1:] if len(exts) > 1 else ''
+                coding_type = CodingType(coding_str) if coding_str else CodingType('')
+
+                # Determine format from first extension (e.g., .fastq, .fq)
+                format_str = exts[0] if exts else ''
+                detected_format = ReadFormat(format_str)
+
                 read_config = ReadConfig(
                     filename=filename,
-                    directory=directory,
                     filepath=filepath,
-                    dirpath=dirpath,
                     ngs_type=ngs_type,
+                    coding_type=coding_type,
+                    detected_format=detected_format,
                     extra=extra
                 )
                 config.reads.append(read_config)
@@ -309,47 +352,72 @@ class Coordinator:
     def _parse_feature_configs(data: dict, config: Config):
         """Parse feature configurations."""
         if 'ref_feature_filename' in data and data['ref_feature_filename']:
-            config.ref_feature = Coordinator._parse_feature_config(
+            config.ref_feature = ConfigManager._parse_feature_config(
                 data['ref_feature_filename'], 'ref_feature_filename', config.config_dir
             )
         
         if 'mod_feature_filename' in data and data['mod_feature_filename']:
-            config.mod_feature = Coordinator._parse_feature_config(
+            config.mod_feature = ConfigManager._parse_feature_config(
                 data['mod_feature_filename'], 'mod_feature_filename', config.config_dir
             )
     
     @staticmethod
     def _parse_feature_config(value: Any, field_name: str, config_dir: Path) -> FeatureConfig:
         """Parse a single feature config entry and resolve paths."""
+        logger = get_logger()
+
         filename = None
         extra = {}
-        
+
         if isinstance(value, dict):
             if 'filename' not in value:
                 raise ValueError(f"{field_name} must contain 'filename' field")
             filename = value['filename']
-            
+
             # Store any extra keys
-            extra = {k: v for k, v in value.items() 
+            extra = {k: v for k, v in value.items()
                     if k not in ['filename']}
-            
+
+            # Warn about extra fields
+            if extra:
+                logger.warning(
+                    f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
+                )
+
         elif isinstance(value, str):
             filename = value
         else:
             raise ValueError(f"{field_name} must be a dict or string")
-        
+
         # Resolve absolute path
         filepath = config_dir / filename
-        
+        filename = filepath.name
+        exts = filepath.suffixes
+
+        # Determine coding type (compression) from extensions
+        coding_str = exts[-1][1:] if len(exts) > 1 else ''
+        coding_type = CodingType(coding_str) if coding_str else CodingType('')
+
+        # Determine format from first extension (e.g., .gtf, .gff, .bed)
+        format_str = exts[0] if exts else ''
+        detected_format = FeatureFormat(format_str)
+
         return FeatureConfig(
             filename=filename,
             filepath=filepath,
+            coding_type=coding_type,
+            detected_format=detected_format,
             extra=extra
         )
         
     @staticmethod
     def _parse_options(data: dict, config: Config):
-        """Parse optional configuration options."""
+        """
+        Parse optional configuration options.
+
+        Note: Options functionality not yet fully implemented.
+        Reserved for future configuration extensions.
+        """
         if 'options' in data:
             config.options = data['options']
     
@@ -357,70 +425,41 @@ class Coordinator:
     def _validate_file_existence(config: Config):
         """Validate that all specified files exist."""
         files_to_check = []
-        
+
         # Genomes
         if config.ref_genome:
-            files_to_check.append(('ref_genome', config.ref_genome.filename))
+            files_to_check.append(('ref_genome', config.ref_genome.filepath))
         if config.mod_genome:
-            files_to_check.append(('mod_genome', config.mod_genome.filename))
-        
+            files_to_check.append(('mod_genome', config.mod_genome.filepath))
+
         # Plasmids
         if config.ref_plasmid:
-            files_to_check.append(('ref_plasmid', config.ref_plasmid.filename))
+            files_to_check.append(('ref_plasmid', config.ref_plasmid.filepath))
         if config.mod_plasmid:
-            files_to_check.append(('mod_plasmid', config.mod_plasmid.filename))
-        
+            files_to_check.append(('mod_plasmid', config.mod_plasmid.filepath))
+
         # Features
         if config.ref_feature:
-            files_to_check.append(('ref_feature', config.ref_feature.filename))
+            files_to_check.append(('ref_feature', config.ref_feature.filepath))
         if config.mod_feature:
-            files_to_check.append(('mod_feature', config.mod_feature.filename))
-        
+            files_to_check.append(('mod_feature', config.mod_feature.filepath))
+
         # Reads
         for idx, read in enumerate(config.reads):
-            if read.filename:
-                files_to_check.append((f'reads[{idx}]', read.filename))
-            elif read.directory:
-                # Check directory exists
-                dir_path = config.resolve_path(read.directory)
-                if not dir_path.exists():
-                    raise FileNotFoundError(f"reads[{idx}] directory not found: {read.directory}")
-                if not dir_path.is_dir():
-                    raise ValueError(f"reads[{idx}] path is not a directory: {read.directory}")
-        
+            if read.filepath:
+                files_to_check.append((f'reads[{idx}]', read.filepath))
+
         # Check all files exist
         missing_files = []
         for name, filepath in files_to_check:
-            full_path = config.resolve_path(filepath)
-            if not full_path.exists():
+            if not filepath.exists():
                 missing_files.append(f"{name}: {filepath}")
-        
+
         if missing_files:
-            raise FileNotFoundError(
+            raise ValidationFileNotFoundError(
                 f"The following files were not found:\n" +
                 "\n".join(f"  - {f}" for f in missing_files)
             )
-    
-    @staticmethod
-    def _validate_file_format(filename: str, allowed_extensions: List[str]) -> bool:
-        """
-        Validate file format based on extension.
-
-        Args:
-            filename: File name to check
-            allowed_extensions: List of allowed extensions (e.g., ['.fa', '.fasta'])
-
-        Returns:
-            True if valid, False otherwise
-        """
-        # Remove compression extensions first
-        name = filename.lower()
-        if name.endswith('.gz'):
-            name = name[:-3]
-        elif name.endswith('.bz2'):
-            name = name[:-4]
-
-        return any(name.endswith(ext) for ext in allowed_extensions)
 
     @staticmethod
     def _setup_output_directory(config: Config):
@@ -429,6 +468,9 @@ class Coordinator:
 
         Creates the output directory at config_dir/output/ if it doesn't exist.
         Sets config.output_dir to the created directory path.
+
+        Note: Individual validators can use output_subdir_name in their settings
+        to create subdirectories within this base output directory.
 
         Args:
             config: Config object to update with output directory

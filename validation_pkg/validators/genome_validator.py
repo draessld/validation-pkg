@@ -21,8 +21,7 @@ from validation_pkg.exceptions import (
     FileFormatError,
     FastaFormatError,
     GenBankFormatError,
-    CompressionError,
-    FileNotFoundError as ValidationFileNotFoundError
+    CompressionError
 )
 
 
@@ -49,11 +48,9 @@ class GenomeValidator:
             plasmid_split: Separate plasmid sequences into different file (default: True)
             sequence_prefix: Prefix to add to sequence IDs, None = no prefix (default: None)
             min_sequence_length: Minimum sequence length to keep in bp (default: 100)
-            convert_to_uppercase: Convert all sequences to uppercase (default: True)
+            convert_to_uppercase: Convert all sequences to uppercase (default: False)
             check_duplicate_ids: Check for and warn about duplicate sequence IDs (default: True)
-            warn_gc_content_low: Warn if GC% below this threshold (default: 20.0)
-            warn_gc_content_high: Warn if GC% above this threshold (default: 80.0)
-            warn_n_sequences: Warn if number of sequences exceeds this (default: 100)
+            warn_n_sequences: Warn if number of sequences exceeds this (default: 2)
             allow_duplicate_ids: Allow duplicate sequence IDs, just warn (default: True)
             always_fasta: Always output as FASTA format (default: True)
             coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
@@ -71,13 +68,11 @@ class GenomeValidator:
         plasmid_split: bool = True
         sequence_prefix: Optional[str] = None
         min_sequence_length: int = 100
-        convert_to_uppercase: bool = True
+        convert_to_uppercase: bool = False
         check_duplicate_ids: bool = True
 
         # Validation thresholds
-        warn_gc_content_low: float = 20.0
-        warn_gc_content_high: float = 80.0
-        warn_n_sequences: int = 100
+        warn_n_sequences: int = 2
         allow_duplicate_ids: bool = True
 
         # Output format
@@ -97,9 +92,11 @@ class GenomeValidator:
         Initialize genome validator.
 
         Args:
-            genome_config: GenomeConfig object
+            genome_config: GenomeConfig object from ConfigManager with file info
             output_dir: Directory for output files (Path object)
             settings: Settings object with validation parameters (uses defaults if None)
+
+        Note: In future versions, output_dir may be moved to settings.
 
         Example:
             >>> settings = GenomeValidator.Settings()
@@ -113,18 +110,13 @@ class GenomeValidator:
 
         # Log settings being used
         self.logger.debug(f"Initializing GenomeValidator with settings:\n{self.settings}")
-        
+
         # Resolved paths
         self.input_path = genome_config.filepath
-        
-        # File properties (discovered during processing)
-        self.is_compressed = False
-        self.compression_type = None  # 'gz' or 'bz2'
-        self.detected_format = None  # 'fasta' or 'genbank'
-        
+
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
-        
+
         # Statistics
         self.statistics = {
             'num_sequences': 0,
@@ -138,123 +130,66 @@ class GenomeValidator:
     def validate(self):
         """
         Main validation and processing workflow.
-        
+
+        Uses genome_config data (format, compression) provided by ConfigManager.
+
         Raises:
             GenomeValidationError: If validation fails
         """
         self.logger.info(f"Processing genome file: {self.genome_config.filename}")
-        
+        self.logger.debug(f"Format: {self.genome_config.detected_format}, Compression: {self.genome_config.coding_type}")
+
         try:
-            # Step 1: Check file existence
-            self._check_file_exists()
-            
-            # Step 2: Detect compression
-            self._detect_compression()
-            
-            # Step 3: Detect file format
-            self._detect_format()
-            
-            # Step 4: Parse and validate
+            # File existence already checked by ConfigManager
+            # Format and compression already detected in genome_config
+
+            # Step 1: Parse and validate
             self._parse_file()
-            
-            # Step 5: Apply editing specifications
+
+            # Step 2: Apply editing specifications
             self._apply_edits()
-            
-            # Step 6: Collect statistics
+
+            # Step 3: Collect statistics
             self._collect_statistics()
-            
-            # Step 7: Convert to FASTA (if needed)
+
+            # Step 4: Convert to FASTA (if needed)
             self._convert_to_fasta()
-            
-            # Step 8: Save to output directory
+
+            # Step 5: Save to output directory
             output_path = self._save_output()
-            
+
             self.logger.info(f"✓ Genome validation completed: {output_path.name}")
             self.logger.debug(f"Statistics: {self.statistics}")
-            
+
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")
             raise
 
-    def _check_file_exists(self):
-        """Check if input file exists."""
-        if not self.input_path.exists():
-            error_msg = f"Genome file not found: {self.genome_config.filename}"
-            self.logger.add_validation_issue(
-                level='ERROR',
-                category='genome',
-                message=error_msg,
-                details={'file': str(self.input_path)}
-            )
-            raise ValidationFileNotFoundError(error_msg)
-        
-        self.logger.debug(f"File exists: {self.input_path}")
-    
-    def _detect_compression(self):
-        """Detect if file is compressed."""
-        suffix = self.input_path.suffix.lower()
-        
-        if suffix == '.gz':
-            self.is_compressed = True
-            self.compression_type = 'gz'
-            self.logger.debug("Detected gzip compression")
-        elif suffix == '.bz2':
-            self.is_compressed = True
-            self.compression_type = 'bz2'
-            self.logger.debug("Detected bzip2 compression")
-        else:
-            self.is_compressed = False
-            self.logger.debug("No compression detected")
-    
-    def _detect_format(self):
-        """Detect file format based on extension."""
-        # Get filename without compression extension
-        filename = str(self.input_path)
-        if self.is_compressed:
-            # Remove .gz or .bz2
-            filename = filename.rsplit('.', 1)[0]
-        
-        filename_lower = filename.lower()
-        
-        # Check FASTA extensions
-        for ext in self.FASTA_EXTENSIONS:
-            if filename_lower.endswith(ext):
-                self.detected_format = 'fasta'
-                self.logger.debug(f"Detected FASTA format (extension: {ext})")
-                return
-        
-        # Check GenBank extensions
-        for ext in self.GENBANK_EXTENSIONS:
-            if filename_lower.endswith(ext):
-                self.detected_format = 'genbank'
-                self.logger.debug(f"Detected GenBank format (extension: {ext})")
-                return
-        
-        # Unknown format
-        error_msg = f"Unknown file format: {self.input_path.name}"
-        self.logger.add_validation_issue(
-            level='ERROR',
-            category='genome',
-            message=error_msg,
-            details={'file': self.genome_config.filename, 'supported': 'FASTA or GenBank'}
-        )
-        raise FileFormatError(error_msg)
-    
     def _open_file(self, mode='rt'):
         """
-        Open file with automatic decompression.
-        
+        Open file with automatic decompression based on genome_config.
+
+        Note: File compression handling will be moved to utils/file_handler.py in future.
+
         Args:
             mode: File opening mode (default: 'rt' for text read)
-            
+
         Returns:
             File handle
+
+        Raises:
+            CompressionError: If file cannot be opened or decompressed
         """
         try:
-            if self.compression_type == 'gz':
+            coding_type_str = str(self.genome_config.coding_type)
+
+            if coding_type_str == 'gz':
                 return gzip.open(self.input_path, mode)
-            elif self.compression_type == 'bz2':
+            elif coding_type_str == 'bz2':
                 return bz2.open(self.input_path, mode)
+            elif coding_type_str == '' or coding_type_str == 'CodingType()':
+                # No compression
+                return open(self.input_path, mode)
             else:
                 return open(self.input_path, mode)
         except Exception as e:
@@ -268,49 +203,51 @@ class GenomeValidator:
             raise CompressionError(error_msg) from e
     
     def _parse_file(self):
-        """Parse file using BioPython and validate format."""
-        self.logger.debug(f"Parsing {self.detected_format} file...")
-        
+        """Parse file using BioPython and validate format from genome_config."""
+        format_str = str(self.genome_config.detected_format)
+        self.logger.debug(f"Parsing {format_str} file...")
+
         try:
             with self._open_file() as handle:
-                # Parse using BioPython
-                self.sequences = list(SeqIO.parse(handle, self.detected_format))
-            
+                # Parse using BioPython - convert GenomeFormat to BioPython format string
+                biopython_format = format_str.lower().replace('genomeformat.', '')
+                self.sequences = list(SeqIO.parse(handle, biopython_format))
+
             # Validate we got sequences
             if not self.sequences:
-                error_msg = f"No sequences found in {self.detected_format} file"
+                error_msg = f"No sequences found in {format_str} file"
                 self.logger.add_validation_issue(
                     level='ERROR',
                     category='genome',
                     message=error_msg,
-                    details={'file': self.genome_config.filename, 'format': self.detected_format}
+                    details={'file': self.genome_config.filename, 'format': format_str}
                 )
                 raise GenomeValidationError(error_msg)
-            
+
             self.logger.debug(f"Parsed {len(self.sequences)} sequence(s)")
-            
+
             # Validate each sequence
             self._validate_sequences()
-            
+
         except FileFormatError:
             raise
         except Exception as e:
-            error_msg = f"Failed to parse {self.detected_format} file: {e}"
-            
-            if self.detected_format == 'fasta':
+            error_msg = f"Failed to parse {format_str} file: {e}"
+
+            if 'fasta' in format_str.lower():
                 exception_class = FastaFormatError
-            elif self.detected_format == 'genbank':
+            elif 'genbank' in format_str.lower() or 'gb' in format_str.lower():
                 exception_class = GenBankFormatError
             else:
                 exception_class = FileFormatError
-            
+
             self.logger.add_validation_issue(
                 level='ERROR',
                 category='genome',
                 message=error_msg,
                 details={
                     'file': self.genome_config.filename,
-                    'format': self.detected_format,
+                    'format': format_str,
                     'error': str(e)
                 }
             )
@@ -449,19 +386,6 @@ class GenomeValidator:
         if total_bases > 0:
             self.statistics['gc_content'] = (total_gc / total_bases) * 100
 
-        # Warn about unusual GC content (using settings thresholds)
-        gc = self.statistics['gc_content']
-        if gc < self.settings.warn_gc_content_low or gc > self.settings.warn_gc_content_high:
-            self.logger.add_validation_issue(
-                level='WARNING',
-                category='genome',
-                message=f"Unusual GC content: {gc:.2f}%",
-                details={
-                    'gc_content': gc,
-                    'expected_range': f"{self.settings.warn_gc_content_low}-{self.settings.warn_gc_content_high}%"
-                }
-            )
-
         # Warn about number of sequences
         if len(self.sequences) > self.settings.warn_n_sequences:
             self.logger.add_validation_issue(
@@ -478,20 +402,24 @@ class GenomeValidator:
     
     def _convert_to_fasta(self):
         """Convert sequences to FASTA format (if not already)."""
-        if self.detected_format == 'fasta':
+        format_str = str(self.genome_config.detected_format).lower()
+
+        if 'fasta' in format_str:
             self.logger.debug("Already in FASTA format")
             return
-        
-        self.logger.debug(f"Converting from {self.detected_format} to FASTA...")
-        
+
+        self.logger.debug(f"Converting from {format_str} to FASTA...")
+
         # BioPython SeqRecord objects can be written as FASTA directly
         # No conversion needed, just change the output format
-        
+
         self.logger.debug("✓ Ready for FASTA output")
     
     def _save_output(self) -> Path:
         """
         Save processed genome to output directory using settings.
+
+        Note: Compression handling will be moved to utils/file_handler.py in future.
 
         Returns:
             Path to output file
@@ -506,11 +434,12 @@ class GenomeValidator:
         # Create output directory
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate output filename
-        base_name = self.input_path.stem
-        if self.is_compressed:
-            # Remove compression extension from stem
-            base_name = Path(base_name).stem
+        # Generate output filename from original filename (without compression extension)
+        # Get base name without any extensions
+        base_name = self.genome_config.filename
+        # Remove all suffixes (.fasta.gz -> remove .gz then .fasta)
+        for suffix in self.input_path.suffixes:
+            base_name = base_name.replace(suffix, '')
 
         # Add suffix if specified
         if self.settings.output_filename_suffix:
@@ -518,7 +447,7 @@ class GenomeValidator:
         else:
             output_filename = f"{base_name}.fasta"
 
-        # Add compression extension if requested
+        # Add compression extension if requested (from settings, not input)
         if self.settings.coding_type == 'gz':
             output_filename += '.gz'
         elif self.settings.coding_type == 'bz2':
