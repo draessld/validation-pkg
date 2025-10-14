@@ -1,0 +1,7 @@
+{
+  "ref_genome_filename": {"filename": "ref.fasta"},
+  "mod_genome_filename": {"filename": "mod.fasta"},
+  "reads": [
+    {"directory": "reads", "ngs_type": "illumina"}
+  ]
+}

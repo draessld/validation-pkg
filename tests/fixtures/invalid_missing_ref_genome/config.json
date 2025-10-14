@@ -1,0 +1,6 @@
+{
+  "mod_genome_filename": {"filename": "mod.fasta"},
+  "reads": [
+    {"filename": "reads.fastq", "ngs_type": "illumina"}
+  ]
+}

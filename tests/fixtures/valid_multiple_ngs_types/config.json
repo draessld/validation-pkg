@@ -1,0 +1,10 @@
+{
+  "ref_genome_filename": {"filename": "ref.fasta"},
+  "mod_genome_filename": {"filename": "mod.fasta"},
+  "reads": [
+    {"filename": "illumina_R1.fastq", "ngs_type": "illumina"},
+    {"filename": "illumina_R2.fastq", "ngs_type": "illumina"},
+    {"filename": "ont_reads.fastq", "ngs_type": "ont"},
+    {"filename": "pacbio_reads.fastq", "ngs_type": "pacbio"}
+  ]
+}
