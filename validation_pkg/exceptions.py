@@ -123,6 +123,18 @@ class FastqFormatError(FileFormatError):
     pass
 
 
+class BamFormatError(FileFormatError):
+    """
+    Raised when BAM file has invalid format.
+    
+    Examples:
+    - Missing quality scores
+    - Length mismatch between sequence and quality
+    - Invalid quality encoding
+    """
+    pass
+
+
 class CompressionError(ValidationError):
     """
     Raised when there are errors decompressing files.

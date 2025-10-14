@@ -23,7 +23,7 @@ A comprehensive Python package for validating and processing bioinformatics file
 - **Genome files**: FASTA and GenBank formats
 - **Feature files**: BED, GFF, and GTF formats
 - **Read files**: FASTQ format (Illumina, Oxford Nanopore, PacBio)
-- **Compressed files**: Transparent handling of `.gz` and `.bz2` compression
+- **Compressed files**: Transparent handling of `.gz`, `.bz2` and `tar.gz` compression
 - **Inter-file validation**: Ensuring consistency between genomes and features
 
 ### Key Features
@@ -219,40 +219,40 @@ The validation pipeline consists of five main stages:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. Configuration Loading                                     │
-│    - Parse JSON configuration                                │
-│    - Validate required fields                                │
-│    - Check file existence                                    │
+│ 1. Configuration Loading                                    │
+│    - Parse JSON configuration                               │
+│    - Validate required fields                               │
+│    - Check file existence                                   │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. Genome Validation                                         │
+│ 2. Genome Validation                                        │
 │    - Detect file format (FASTA/GenBank)                     │
 │    - Validate format correctness                            │
-│    - Handle compression (if needed)                          │
-│    - Collect statistics                                      │
+│    - Handle compression (if needed)                         │
+│    - Collect statistics                                     │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. Feature Validation                                        │
+│ 3. Feature Validation                                       │
 │    - Detect file format (BED/GFF/GTF)                       │
 │    - Validate format correctness                            │
 │    - Check feature coordinates                              │
-│    - Collect statistics                                      │
+│    - Collect statistics                                     │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. Read Validation                                           │
-│    - Validate FASTQ format                                   │
-│    - Check quality scores                                    │
+│ 4. Read Validation                                          │
+│    - Validate FASTQ format                                  │
+│    - Check quality scores                                   │
 │    - Verify paired-end consistency                          │
-│    - Collect statistics                                      │
+│    - Collect statistics                                     │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. Inter-File Validation                                     │
+│ 5. Inter-File Validation                                    │
 │    - Check feature coordinates vs genome length             │
-│    - Verify sequence ID consistency                          │
+│    - Verify sequence ID consistency                         │
 │    - Validate cross-references                              │
 └─────────────────────────────────────────────────────────────┘
                             ↓
@@ -263,7 +263,7 @@ The validation pipeline consists of five main stages:
 
 ### Component Descriptions
 
-#### Coordinator
+#### ConfigManager
 
 **Purpose**: Configuration management and validation entry point
 
@@ -275,7 +275,7 @@ The validation pipeline consists of five main stages:
 
 **Key Classes**:
 - `Config`: Data holder for configuration
-- `Coordinator`: Configuration loader and validator
+- `ConfigManager`: Configuration loader and validator
 - `GenomeConfig`, `ReadConfig`, `FeatureConfig`: Type-safe configuration objects
 
 #### Logger
@@ -379,7 +379,7 @@ When an error occurs:
 
 ```python
 try:
-    config = Coordinator.load("config.json")
+    config = ConfigManager.load("config.json")
 except ConfigurationError as e:
     # User sees: "ConfigurationError: Missing required field: reads"
     # Log shows: Full stack trace and config file location
@@ -441,7 +441,7 @@ ERROR - [genome] Invalid FASTA format at line 42
 **Example**:
 ```
 ================================================================================
-BIOINFORMATICS VALIDATION REPORT
+GMO VALIDATION REPORT
 ================================================================================
 Generated: 2025-10-13 14:30:20
 

@@ -363,7 +363,6 @@ class ConfigManager:
                         #   TODO: it determines "tar.gz" as GZIP, not as TGZ coding 
                         # Determine coding type (compression) from extensions
                         coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
-                        print(coding_str)
                         coding_type = CodingType(coding_str) if coding_str else CodingType('')
 
                         # Determine format from first extension (e.g., .fastq, .fq)

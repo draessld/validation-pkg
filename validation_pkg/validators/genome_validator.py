@@ -43,7 +43,7 @@ class GenomeValidator:
     class Settings(BaseSettings):
         """
         Settings for genome validation and processing.
-
+        #   TODO: update attributes
         Attributes:
             plasmid_split: Separate plasmid sequences into different file (default: True)
             sequence_prefix: Prefix to add to sequence IDs, None = no prefix (default: None)
@@ -52,11 +52,9 @@ class GenomeValidator:
             check_duplicate_ids: Check for and warn about duplicate sequence IDs (default: True)
             warn_n_sequences: Warn if number of sequences exceeds this (default: 2)
             allow_duplicate_ids: Allow duplicate sequence IDs, just warn (default: True)
-            always_fasta: Always output as FASTA format (default: True)
             coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
             output_filename_suffix: Suffix to add to output filename (default: None)
             output_subdir_name: Subdirectory name for output files (default: None)
-            line_width: Characters per line in FASTA output (default: 80)
 
         Example:
             >>> settings = GenomeValidator.Settings()
@@ -64,27 +62,22 @@ class GenomeValidator:
             >>> ref_settings = settings.update(sequence_prefix="chr1", output_filename_suffix="ref")
             >>> validator = GenomeValidator(genome_config, output_dir, ref_settings)
         """
+        # Validation thresholds
+        allow_empty_sequences: bool = False
+        allow_empty_id: bool = False
+        warn_n_sequences: int = 2
+        check_invalid_chars: bool = False
+        allow_duplicate_ids: bool = True
+
         # Editing specifications
         plasmid_split: bool = True
         sequence_prefix: Optional[str] = None
         min_sequence_length: int = 100
-        check_duplicate_ids: bool = True
-
-        # Validation thresholds
-        warn_n_sequences: int = 2
-        allow_duplicate_ids: bool = True
 
         # Output format
-        always_fasta: bool = True
         coding_type: Optional[str] = None
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
-        line_width: int = 80
-
-    # Supported file extensions
-    FASTA_EXTENSIONS = ['.fa', '.fasta', '.fna']
-    GENBANK_EXTENSIONS = ['.gb', '.gbk', '.genbank']
-    COMPRESSION_EXTENSIONS = ['.gz', '.bz2']
 
     def __init__(self, genome_config, output_dir, settings: Optional[Settings] = None):
         """
@@ -225,7 +218,7 @@ class GenomeValidator:
 
             self.logger.debug(f"Parsed {len(self.sequences)} sequence(s)")
 
-            # Validate each sequence
+            # Validate sequences
             self._validate_sequences()
 
         except FileFormatError:
@@ -258,16 +251,19 @@ class GenomeValidator:
         
         for idx, record in enumerate(self.sequences):
             # Check sequence ID
-            if not record.id:
-                self.logger.add_validation_issue(
-                    level='WARNING',
-                    category='genome',
-                    message=f'Sequence {idx} has no ID',
-                    details={'sequence_index': idx}
-                )
+            if not record.id and not self.settings.allow_empty_id:
+                error_msg = f"Sequence '{record.id}' has no ID"
+                if not record.id:
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='genome',
+                        message=f'Sequence {idx} has no ID',
+                        details={'sequence_index': idx}
+                    )
+                raise GenomeValidationError(error_msg)
             
             # Check sequence length
-            if len(record.seq) == 0:
+            if len(record.seq) == 0 and not self.settings.allow_empty_sequences:
                 error_msg = f"Sequence '{record.id}' has zero length"
                 self.logger.add_validation_issue(
                     level='ERROR',
@@ -278,21 +274,38 @@ class GenomeValidator:
                 raise GenomeValidationError(error_msg)
             
             # Check for valid nucleotides
-            valid_chars = set('ATCGNatcgn')
-            seq_str = str(record.seq)
-            invalid_chars = set(seq_str) - valid_chars
-            
-            if invalid_chars:
+            if self.settings.check_invalid_chars:
+                valid_chars = set('ATCGNatcgn')
+                seq_str = str(record.seq)
+                invalid_chars = set(seq_str) - valid_chars
+
+                if invalid_chars:
+                    error_msg = f"Sequence '{record.id}' has contains invalid chars"
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='genome',
+                        message=f"Sequence '{record.id}' contains non-standard characters",
+                        details={
+                            'sequence_id': record.id,
+                            'invalid_chars': list(invalid_chars),
+                            'count': sum(1 for c in seq_str if c in invalid_chars)
+                        }
+                    )
+                    raise GenomeValidationError(error_msg)
+
+        # 3. Check for duplicate IDs
+        if not self.settings.allow_duplicate_ids:
+            seq_ids = [record.id for record in self.sequences]
+            if len(seq_ids) != len(set(seq_ids)):
+                duplicates = [sid for sid in seq_ids if seq_ids.count(sid) > 1]
                 self.logger.add_validation_issue(
-                    level='WARNING',
+                    level='ERROR',
                     category='genome',
-                    message=f"Sequence '{record.id}' contains non-standard characters",
-                    details={
-                        'sequence_id': record.id,
-                        'invalid_chars': list(invalid_chars),
-                        'count': sum(1 for c in seq_str if c in invalid_chars)
-                    }
+                    message=f'Duplicate sequence IDs found',
+                    details={'duplicate_ids': list(set(duplicates))}
                 )
+                if not self.settings.allow_duplicate_ids:
+                    raise GenomeValidationError(f"Duplicate sequence IDs not allowed: {list(set(duplicates))}")
         
         self.logger.debug("✓ Sequence validation passed")
     
@@ -332,20 +345,10 @@ class GenomeValidator:
                 record.name = record.id
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
-        # 3. Check for duplicate IDs
-        if self.settings.check_duplicate_ids:
-            seq_ids = [record.id for record in self.sequences]
-            if len(seq_ids) != len(set(seq_ids)):
-                duplicates = [sid for sid in seq_ids if seq_ids.count(sid) > 1]
-                level = 'ERROR' if not self.settings.allow_duplicate_ids else 'WARNING'
-                self.logger.add_validation_issue(
-                    level=level,
-                    category='genome',
-                    message=f'Duplicate sequence IDs found',
-                    details={'duplicate_ids': list(set(duplicates))}
-                )
-                if not self.settings.allow_duplicate_ids:
-                    raise GenomeValidationError(f"Duplicate sequence IDs not allowed: {list(set(duplicates))}")
+        # 4. Split plasmid sequence
+        if self.settings.plasmid_split:
+            #   TODO: only if number of sequences is greater than 2: keep the longest one in this file, the rest save into new FASTA file with same name and same settings, but with suffix `plasmid`
+            pass
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
     
@@ -472,4 +475,3 @@ class GenomeValidator:
             Dictionary of statistics
         """
         return self.statistics.copy()
-
