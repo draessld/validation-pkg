@@ -6,6 +6,7 @@ Handles FASTA and GenBank formats with compression support.
 
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -14,6 +15,7 @@ import bz2
 import shutil
 
 from validation_pkg.logger import get_logger
+from validation_pkg.utils.settings import BaseSettings
 from validation_pkg.exceptions import (
     GenomeValidationError,
     FileFormatError,
@@ -27,7 +29,7 @@ from validation_pkg.exceptions import (
 class GenomeValidator:
     """
     Validates and processes genome files (FASTA and GenBank formats).
-    
+
     Workflow:
     1. Detect and handle compression
     2. Detect file format
@@ -37,26 +39,80 @@ class GenomeValidator:
     6. Compress if requested
     7. Save to output directory
     """
-    
+
+    @dataclass
+    class Settings(BaseSettings):
+        """
+        Settings for genome validation and processing.
+
+        Attributes:
+            plasmid_split: Separate plasmid sequences into different file (default: True)
+            sequence_prefix: Prefix to add to sequence IDs, None = no prefix (default: None)
+            min_sequence_length: Minimum sequence length to keep in bp (default: 100)
+            convert_to_uppercase: Convert all sequences to uppercase (default: True)
+            check_duplicate_ids: Check for and warn about duplicate sequence IDs (default: True)
+            warn_gc_content_low: Warn if GC% below this threshold (default: 20.0)
+            warn_gc_content_high: Warn if GC% above this threshold (default: 80.0)
+            warn_n_sequences: Warn if number of sequences exceeds this (default: 100)
+            allow_duplicate_ids: Allow duplicate sequence IDs, just warn (default: True)
+            always_fasta: Always output as FASTA format (default: True)
+            coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
+            output_filename_suffix: Suffix to add to output filename (default: None)
+            output_subdir_name: Subdirectory name for output files (default: None)
+            line_width: Characters per line in FASTA output (default: 80)
+
+        Example:
+            >>> settings = GenomeValidator.Settings()
+            >>> print(settings)  # View all settings
+            >>> ref_settings = settings.update(sequence_prefix="chr1", output_filename_suffix="ref")
+            >>> validator = GenomeValidator(genome_config, output_dir, ref_settings)
+        """
+        # Editing specifications
+        plasmid_split: bool = True
+        sequence_prefix: Optional[str] = None
+        min_sequence_length: int = 100
+        convert_to_uppercase: bool = True
+        check_duplicate_ids: bool = True
+
+        # Validation thresholds
+        warn_gc_content_low: float = 20.0
+        warn_gc_content_high: float = 80.0
+        warn_n_sequences: int = 100
+        allow_duplicate_ids: bool = True
+
+        # Output format
+        always_fasta: bool = True
+        coding_type: Optional[str] = None
+        output_filename_suffix: Optional[str] = None
+        output_subdir_name: Optional[str] = None
+        line_width: int = 80
+
     # Supported file extensions
     FASTA_EXTENSIONS = ['.fa', '.fasta', '.fna']
     GENBANK_EXTENSIONS = ['.gb', '.gbk', '.genbank']
     COMPRESSION_EXTENSIONS = ['.gz', '.bz2']
-    
-    def __init__(self, genome_config, output_dir, settings: dict):
+
+    def __init__(self, genome_config, output_dir, settings: Optional[Settings] = None):
         """
         Initialize genome validator.
-        
+
         Args:
             genome_config: GenomeConfig object
-            config_dir: Directory containing the config file (for resolving paths)
-            output_dir: Directory for output files
-            settings: specifying the edit processes
+            output_dir: Directory for output files (Path object)
+            settings: Settings object with validation parameters (uses defaults if None)
+
+        Example:
+            >>> settings = GenomeValidator.Settings()
+            >>> settings = settings.update(sequence_prefix="chr1")
+            >>> validator = GenomeValidator(genome_config, output_dir, settings)
         """
         self.logger = get_logger()
         self.genome_config = genome_config
-        self.output_dir = output_dir
-        self.settings = settings
+        self.output_dir = Path(output_dir)
+        self.settings = settings if settings is not None else self.Settings()
+
+        # Log settings being used
+        self.logger.debug(f"Initializing GenomeValidator with settings:\n{self.settings}")
         
         # Resolved paths
         self.input_path = genome_config.filepath
@@ -119,7 +175,7 @@ class GenomeValidator:
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")
             raise
-    
+
     def _check_file_exists(self):
         """Check if input file exists."""
         if not self.input_path.exists():
@@ -306,62 +362,73 @@ class GenomeValidator:
     
     def _apply_edits(self):
         """
-        Apply editing specifications to sequences.
-        
-        This is where you can add custom editing logic.
-        Examples:
-        - Remove sequences below certain length
-        - Mask low-complexity regions
-        - Trim sequences
-        - Replace ambiguous nucleotides
+        Apply editing specifications to sequences based on settings.
+
+        Applies the following edits (if enabled in settings):
+        - Remove short sequences (min_sequence_length)
+        - Convert to uppercase (convert_to_uppercase)
+        - Add sequence prefix (sequence_prefix)
+        - Check for duplicate IDs (check_duplicate_ids)
         """
-        self.logger.debug("Applying editing specifications...")
-        
-        # Example 1: Remove very short sequences
-        min_length = 100
-        original_count = len(self.sequences)
-        self.sequences = [seq for seq in self.sequences if len(seq.seq) >= min_length]
-        
-        if len(self.sequences) < original_count:
-            removed = original_count - len(self.sequences)
-            self.logger.add_validation_issue(
-                level='WARNING',
-                category='genome',
-                message=f'Removed {removed} sequence(s) shorter than {min_length}bp',
-                details={'min_length': min_length, 'removed_count': removed}
-            )
-        
-        # Example 2: Convert to uppercase
-        for record in self.sequences:
-            record.seq = record.seq.upper()
-        
-        # Example 3: Check for duplicate IDs
-        seq_ids = [record.id for record in self.sequences]
-        if len(seq_ids) != len(set(seq_ids)):
-            duplicates = [sid for sid in seq_ids if seq_ids.count(sid) > 1]
-            self.logger.add_validation_issue(
-                level='WARNING',
-                category='genome',
-                message=f'Duplicate sequence IDs found',
-                details={'duplicate_ids': list(set(duplicates))}
-            )
-        
-        # TODO: Add more editing specifications as needed
-        # - self._remove_ambiguous_nucleotides()
-        # - self._trim_sequences()
-        # - self._mask_repeats()
-        
+        self.logger.debug("Applying editing specifications from settings...")
+
+        # 1. Remove short sequences
+        if self.settings.min_sequence_length > 0:
+            min_length = self.settings.min_sequence_length
+            original_count = len(self.sequences)
+            self.sequences = [seq for seq in self.sequences if len(seq.seq) >= min_length]
+
+            if len(self.sequences) < original_count:
+                removed = original_count - len(self.sequences)
+                self.logger.add_validation_issue(
+                    level='WARNING',
+                    category='genome',
+                    message=f'Removed {removed} sequence(s) shorter than {min_length}bp',
+                    details={'min_length': min_length, 'removed_count': removed}
+                )
+
+        # 2. Convert to uppercase
+        if self.settings.convert_to_uppercase:
+            for record in self.sequences:
+                record.seq = record.seq.upper()
+            self.logger.debug("Converted all sequences to uppercase")
+
+        # 3. Add sequence prefix
+        if self.settings.sequence_prefix:
+            prefix = self.settings.sequence_prefix
+            for record in self.sequences:
+                # Add prefix to sequence ID
+                record.id = f"{prefix}_{record.id}"
+                # Also update the name field to match
+                record.name = record.id
+            self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
+
+        # 4. Check for duplicate IDs
+        if self.settings.check_duplicate_ids:
+            seq_ids = [record.id for record in self.sequences]
+            if len(seq_ids) != len(set(seq_ids)):
+                duplicates = [sid for sid in seq_ids if seq_ids.count(sid) > 1]
+                level = 'ERROR' if not self.settings.allow_duplicate_ids else 'WARNING'
+                self.logger.add_validation_issue(
+                    level=level,
+                    category='genome',
+                    message=f'Duplicate sequence IDs found',
+                    details={'duplicate_ids': list(set(duplicates))}
+                )
+                if not self.settings.allow_duplicate_ids:
+                    raise GenomeValidationError(f"Duplicate sequence IDs not allowed: {list(set(duplicates))}")
+
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
     
     def _collect_statistics(self):
-        """Collect statistics about the sequences."""
+        """Collect statistics about the sequences and validate against thresholds."""
         self.logger.debug("Collecting statistics...")
-        
+
         if not self.sequences:
             return
-        
+
         lengths = [len(record.seq) for record in self.sequences]
-        
+
         self.statistics = {
             'num_sequences': len(self.sequences),
             'total_length': sum(lengths),
@@ -369,28 +436,44 @@ class GenomeValidator:
             'max_length': max(lengths),
             'avg_length': sum(lengths) / len(lengths)
         }
-        
+
         # Calculate GC content
         total_gc = 0
         total_bases = 0
-        
+
         for record in self.sequences:
             seq_str = str(record.seq).upper()
             total_gc += seq_str.count('G') + seq_str.count('C')
             total_bases += len(seq_str)
-        
+
         if total_bases > 0:
             self.statistics['gc_content'] = (total_gc / total_bases) * 100
-        
-        # Log unusual statistics
-        if self.statistics['gc_content'] < 20 or self.statistics['gc_content'] > 80:
+
+        # Warn about unusual GC content (using settings thresholds)
+        gc = self.statistics['gc_content']
+        if gc < self.settings.warn_gc_content_low or gc > self.settings.warn_gc_content_high:
             self.logger.add_validation_issue(
                 level='WARNING',
                 category='genome',
-                message=f"Unusual GC content: {self.statistics['gc_content']:.2f}%",
-                details={'gc_content': self.statistics['gc_content']}
+                message=f"Unusual GC content: {gc:.2f}%",
+                details={
+                    'gc_content': gc,
+                    'expected_range': f"{self.settings.warn_gc_content_low}-{self.settings.warn_gc_content_high}%"
+                }
             )
-        
+
+        # Warn about number of sequences
+        if len(self.sequences) > self.settings.warn_n_sequences:
+            self.logger.add_validation_issue(
+                level='WARNING',
+                category='genome',
+                message=f"High number of sequences: {len(self.sequences)}",
+                details={
+                    'num_sequences': len(self.sequences),
+                    'threshold': self.settings.warn_n_sequences
+                }
+            )
+
         self.logger.debug(f"Statistics: {self.statistics}")
     
     def _convert_to_fasta(self):
@@ -408,46 +491,56 @@ class GenomeValidator:
     
     def _save_output(self) -> Path:
         """
-        Save processed genome to output directory.
-        
+        Save processed genome to output directory using settings.
+
         Returns:
             Path to output file
         """
         self.logger.debug("Saving output file...")
-        
+
+        # Determine output directory (with optional subdirectory)
+        output_dir = self.output_dir
+        if self.settings.output_subdir_name:
+            output_dir = output_dir / self.settings.output_subdir_name
+
         # Create output directory
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         # Generate output filename
         base_name = self.input_path.stem
         if self.is_compressed:
             # Remove compression extension from stem
             base_name = Path(base_name).stem
-        
-        # Always save as FASTA
-        output_filename = f"{base_name}.fasta"
-        
+
+        # Add suffix if specified
+        if self.settings.output_filename_suffix:
+            output_filename = f"{base_name}_{self.settings.output_filename_suffix}.fasta"
+        else:
+            output_filename = f"{base_name}.fasta"
+
         # Add compression extension if requested
-        if self.settings['output']['coding_type'] == 'gz':
+        if self.settings.coding_type == 'gz':
             output_filename += '.gz'
-        elif self.settings['output']['coding_type'] == 'bzip':
+        elif self.settings.coding_type == 'bz2':
             output_filename += '.bz2'
-        
-        output_path = self.output_dir / output_filename
-        
-        # Write output
-        if self.settings['output']['coding_type'] == 'gz':
+
+        output_path = output_dir / output_filename
+
+        # Write output with appropriate compression
+        self.logger.debug(f"Writing output to: {output_path}")
+
+        if self.settings.coding_type == 'gz':
             with gzip.open(output_path, 'wt') as handle:
                 SeqIO.write(self.sequences, handle, 'fasta')
-        elif self.settings['output']['coding_type'] == 'bzip':
+        elif self.settings.coding_type == 'bz2':
             with bz2.open(output_path, 'wt') as handle:
                 SeqIO.write(self.sequences, handle, 'fasta')
         else:
             with open(output_path, 'w') as handle:
                 SeqIO.write(self.sequences, handle, 'fasta')
-        
+
         self.logger.info(f"Output saved: {output_path}")
-        
+
         return output_path
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -459,20 +552,3 @@ class GenomeValidator:
         """
         return self.statistics.copy()
 
-
-# Convenience function for easy use
-def validate_genome(genome_config, config_dir: Path, output_dir: Path) -> GenomeValidator:
-    """
-    Validate and process a genome file.
-    
-    Args:
-        genome_config: GenomeConfig object
-        config_dir: Directory containing config file
-        output_dir: Output directory for processed files
-        
-    Returns:
-        GenomeValidator instance with statistics
-    """
-    validator = GenomeValidator(genome_config, config_dir, output_dir)
-    validator.validate()
-    return validator

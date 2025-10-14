@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
 # Import logging and exceptions
-from validation_pkg.utils import settings
+from validation_pkg.utils.formats import CodingType,GenomeFormat
 from validation_pkg.logger import get_logger
 from validation_pkg.exceptions import (
     ConfigurationError,
@@ -20,8 +20,10 @@ from validation_pkg.exceptions import (
 @dataclass
 class GenomeConfig:
     """Configuration for genome or plasmid files."""
-    filename: str  # Original relative filename
+    filename: str  # Original filename
     filepath: Path  # Absolute resolved path
+    coding_type: CodingType  # Coding type applied on file
+    detected_format: GenomeFormat   # Genome file format
     
     # Store any additional keys from config
     extra: Dict[str, Any] = None
@@ -187,8 +189,9 @@ class Coordinator:
             Coordinator._parse_options(data, config)
             logger.debug("Validating file existence...")
             Coordinator._validate_file_existence(config)
-            logger.debug("Setup output directory...")
-            
+            logger.debug("Setting up output directory...")
+            Coordinator._setup_output_directory(config)
+
             logger.info("✓ Configuration loaded and validated successfully")
             return config
             
@@ -238,7 +241,7 @@ class Coordinator:
     @staticmethod
     def _parse_genome_config(value: Any, field_name: str, config_dir: Path) -> GenomeConfig:
         """Parse a single genome config entry and resolve paths."""
-        filename = None
+       
         extra = {}  
         if isinstance(value, dict):
             if 'filename' not in value:
@@ -252,13 +255,17 @@ class Coordinator:
             filename = value
         else:
             raise ValueError(f"{field_name} must be a dict or string")
-        
-        # Resolve absolute path
+
+        # Resolve absolute path and filename
         filepath = config_dir / filename
-        
+        filename = filepath.name    #   include extension
+        exts = filepath.suffixes
+
         return GenomeConfig(
             filename=filename,
             filepath=filepath,
+            coding_type=CodingType('.'.join(exts[1:])),
+            detected_format=GenomeFormat(exts[0]),
             extra=extra)
     
     @staticmethod
@@ -398,11 +405,11 @@ class Coordinator:
     def _validate_file_format(filename: str, allowed_extensions: List[str]) -> bool:
         """
         Validate file format based on extension.
-        
+
         Args:
             filename: File name to check
             allowed_extensions: List of allowed extensions (e.g., ['.fa', '.fasta'])
-            
+
         Returns:
             True if valid, False otherwise
         """
@@ -412,10 +419,35 @@ class Coordinator:
             name = name[:-3]
         elif name.endswith('.bz2'):
             name = name[:-4]
-        
+
         return any(name.endswith(ext) for ext in allowed_extensions)
-    
+
+    @staticmethod
+    def _setup_output_directory(config: Config):
         """
-        Setup output path by default on tmp path
+        Set up output directory for validation results.
+
+        Creates the output directory at config_dir/output/ if it doesn't exist.
+        Sets config.output_dir to the created directory path.
+
+        Args:
+            config: Config object to update with output directory
+
+        Raises:
+            OSError: If directory creation fails
         """
-        config.output_dir = config.config_dir / dirname
+        logger = get_logger()
+
+        # Create output directory path
+        output_dir = config.config_dir / "output"
+
+        # Create directory if it doesn't exist
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            config.output_dir = output_dir
+            logger.info(f"Output directory: {output_dir}")
+            logger.debug(f"Output directory created/verified: {output_dir}")
+        except OSError as e:
+            error_msg = f"Failed to create output directory: {e}"
+            logger.error(error_msg)
+            raise ConfigurationError(error_msg) from e

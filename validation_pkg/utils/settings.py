@@ -1,125 +1,177 @@
 """
 Global settings and configuration for validators.
 
-This file contains default settings for all validators including:
-- Output directories
-- Compression settings
-- Editing specifications
-- Validation thresholds
+This file contains:
+- Global constants (output directory names, etc.)
+- BaseSettings class with common functionality for all validator settings
 """
 
-from pathlib import Path
-from typing import Dict, Any, Optional
+from dataclasses import asdict, fields
+from copy import deepcopy
+from typing import Dict, Any
+from abc import ABC
 
 
-# ===== GLOBALS =====
+# ===== GLOBAL CONSTANTS =====
 output_dir_name = "output"
 
 
-# ===== Validator settings =====
-class ValidatorSettings:
+# ===== Base Settings Class =====
+class BaseSettings(ABC):
     """
-    Centralized settings for all validators.
-    
-    Can be customized by creating an instance and modifying attributes,
-    or by loading from a settings file.
+    Base class for all validator settings with common functionality.
+
+    Features:
+    - Deep copy support
+    - Immutable update pattern (returns new instance)
+    - Dictionary conversion for serialization
+    - Pretty printing
+    - from_dict() class method for loading from dictionaries
+    - Validation of setting names (prevents typos)
+
+    Usage:
+        # Create settings
+        settings = MyValidator.Settings()
+
+        # Update (returns new instance)
+        new_settings = settings.update(param1=value1, param2=value2)
+
+        # Print to inspect
+        print(settings)
+
+        # Convert to dict
+        settings_dict = settings.to_dict()
+
+        # Load from dict
+        settings = MyValidator.Settings.from_dict({'param1': value1})
     """
-    
-    def __init__(self):
-        # ===== OUTPUT SETTINGS =====
-        self.output_base_dir = "output"  # Base output directory
-        self.output_subdirs = {
-            'genomes': 'genomes',
-            'plasmids': 'plasmids',
-            'features': 'features',
-            'reads': 'reads'
-        }
-        
-        # ===== COMPRESSION SETTINGS =====
-        # Override output compression (None means use config file setting)
-        self.force_output_compression = None  # None, 'none', 'gz', 'bzip', 'tgz'
-        
-        # ===== GENOME VALIDATOR SETTINGS =====
-        self.genome_settings = {
-            # Editing specifications, default
-            'edits': {
-                'plasmid_split':True,
-                'sequence_prefix':None,
-                # 'remove_short_sequences': True,
-                # 'min_sequence_length': 100,
-                # 'convert_to_uppercase': True,
-                # 'check_duplicate_ids': True,
-                # 'remove_ambiguous_nucleotides': False,
-                # 'ambiguous_threshold': 0.05,  # Max 5% ambiguous (N) allowed
-                # 'trim_sequences': False,
-                # 'trim_start': 0,
-                # 'trim_end': 0,
-                # 'filter_by_gc': False,
-                # 'min_gc_content': 20.0,
-                # 'max_gc_content': 80.0,
-            },
-            
-            # Validation thresholds
-            'validation': {
-                'warn_gc_content_low': 20.0,
-                'warn_gc_content_high': 80.0,
-                'warn_sequence_length_low': 1000,
-                'warn_sequence_length_high': 10000000,
-                'allow_empty_sequences': False,
-                'allow_duplicate_ids': True,  # Just warn, don't fail
-            },
-            
-            # Output format
-            'output': {
-                'always_fasta': True,  # Always convert to FASTA
-                'output_subdir_name':None,
-                'output_filename_suffix':None,
-                'line_width': 80,  # Characters per line in FASTA
-            }
-        }
-        
-        # ===== FEATURE VALIDATOR SETTINGS =====
-        self.feature_settings = {
-            'edits': {
-                'sort_by_position': True,
-                'remove_overlapping': False,
-                'merge_adjacent': False,
-                'filter_by_type': False,
-                'allowed_types': ['gene', 'CDS', 'exon'],
-            },
-            
-            'validation': {
-                'check_coordinates': True,
-                'allow_negative_strand': True,
-                'check_feature_types': False,
-                'required_attributes': [],
-            },
-            
-            'output': {
-                'preferred_format': 'gff3',  # 'gff3', 'gtf', or 'bed'
-            }
-        }
-        
-        # ===== READ VALIDATOR SETTINGS =====
-        self.read_settings = {
-            'validation': {
-                'check_quality_scores': True,
-                'min_quality_score': 20,
-                'min_read_length': 50,
-                'max_read_length': 1000000,
-                'check_paired_end': True,
-            },
-            
-            'edits': {
-                'trim_quality': False,
-                'quality_threshold': 20,
-                'trim_adapters': False,
-            }
-        }
-        
-        # ===== INTER-FILE VALIDATION SETTINGS =====
-        self.inter_file_settings = {
-            'check_feature_bounds': True,  # Features within genome bounds
-            'check_sequence_ids': True,    # Sequence IDs match
-            'allow_missing_sequences': False,  # Features can reference missing seqs
-        }
+
+    def copy(self):
+        """
+        Return a deep copy of settings.
+
+        Returns:
+            New settings instance with copied values
+        """
+        return deepcopy(self)
+
+    def update(self, **kwargs):
+        """
+        Update settings and return new instance (immutable pattern).
+
+        This method prevents mutation of the original settings object,
+        which avoids bugs from shared mutable state.
+
+        Args:
+            **kwargs: Settings to update
+
+        Returns:
+            New settings instance with updated values
+
+        Raises:
+            ValueError: If an unknown setting name is provided
+
+        Example:
+            >>> settings = GenomeValidator.Settings()
+            >>> new_settings = settings.update(sequence_prefix="chr1")
+            >>> settings.sequence_prefix  # Original unchanged
+            None
+            >>> new_settings.sequence_prefix
+            'chr1'
+        """
+        new_settings = self.copy()
+
+        # Get list of valid field names
+        valid_fields = {f.name for f in fields(new_settings)}
+
+        # Check for unknown fields
+        unknown = set(kwargs.keys()) - valid_fields
+        if unknown:
+            allowed = ', '.join(sorted(valid_fields))
+            unknown_str = ', '.join(f"'{k}'" for k in sorted(unknown))
+            raise ValueError(
+                f"Unknown setting(s) {unknown_str} for {self.__class__.__name__}. "
+                f"Allowed settings: {allowed}"
+            )
+
+        # Update fields
+        for key, value in kwargs.items():
+            setattr(new_settings, key, value)
+
+        return new_settings
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert settings to dictionary for serialization.
+
+        Returns:
+            Dictionary with all settings
+
+        Example:
+            >>> settings.to_dict()
+            {'plasmid_split': True, 'sequence_prefix': None, ...}
+        """
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        """
+        Create settings instance from dictionary.
+
+        Args:
+            data: Dictionary with settings
+
+        Returns:
+            New settings instance
+
+        Raises:
+            ValueError: If dictionary contains unknown settings
+
+        Example:
+            >>> data = {'sequence_prefix': 'chr1', 'plasmid_split': False}
+            >>> settings = GenomeValidator.Settings.from_dict(data)
+        """
+        # Get valid field names
+        valid_fields = {f.name for f in fields(cls)}
+
+        # Check for unknown fields
+        unknown = set(data.keys()) - valid_fields
+        if unknown:
+            allowed = ', '.join(sorted(valid_fields))
+            unknown_str = ', '.join(f"'{k}'" for k in sorted(unknown))
+            raise ValueError(
+                f"Unknown setting(s) {unknown_str} for {cls.__name__}. "
+                f"Allowed settings: {allowed}"
+            )
+
+        return cls(**data)
+
+    def __str__(self) -> str:
+        """
+        Pretty print settings for inspection.
+
+        Returns:
+            Formatted string representation
+
+        Example:
+            >>> print(settings)
+            GenomeValidator.Settings:
+              plasmid_split: True
+              sequence_prefix: None
+              min_sequence_length: 100
+              ...
+        """
+        lines = [f"{self.__class__.__name__}:"]
+        for key, value in self.to_dict().items():
+            lines.append(f"  {key}: {value}")
+        return '\n'.join(lines)
+
+    def __repr__(self) -> str:
+        """
+        Return repr string for debugging.
+
+        Returns:
+            String representation suitable for debugging
+        """
+        params = ', '.join(f"{k}={v!r}" for k, v in self.to_dict().items())
+        return f"{self.__class__.__name__}({params})"
