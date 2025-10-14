@@ -146,6 +146,7 @@ class FeatureFormat(Enum):
         
         # Extension mapping
         extension_map = {
+            'gff': cls.GFF,
             'gff3': cls.GFF,
             'gtf': cls.GFF,
             'gff2': cls.GFF,

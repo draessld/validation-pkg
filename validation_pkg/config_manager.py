@@ -28,8 +28,8 @@ class GenomeConfig:
     """Configuration for genome or plasmid files."""
     filename: str  # Original filename
     filepath: Path  # Absolute resolved path
-    coding_type: CodingType  # Coding type applied on file
-    detected_format: GenomeFormat   # Genome file format
+    coding_type: CodingType = None  # Coding type applied on file
+    detected_format: GenomeFormat = None  # Genome file format
     
     # Store any additional keys from config
     extra: Dict[str, Any] = None
@@ -44,7 +44,7 @@ class ReadConfig:
     filename: str  # Original filename
     filepath: Path  # Absolute resolved path
     ngs_type: str = "illumina"  # "illumina", "ont", "pacbio"
-    coding_type: CodingType = None  # Coding type applied on file
+    coding_type: CodingType = None # Coding type applied on file
     detected_format: ReadFormat = None  # Read file format
 
     # Store any additional keys from config
@@ -61,8 +61,8 @@ class FeatureConfig:
     """Configuration for feature files."""
     filename: str  # Original relative filename
     filepath: Path  # Absolute resolved path
-    coding_type: CodingType  # Coding type applied on file
-    detected_format: FeatureFormat   # Genome file format
+    coding_type: CodingType = None # Coding type applied on file
+    detected_format: FeatureFormat = None  # Genome file format
     
     # Store any additional keys from config
     extra: Dict[str, Any] = None
@@ -300,51 +300,86 @@ class ConfigManager:
         for idx, read_entry in enumerate(reads_data):
             if not isinstance(read_entry, dict):
                 raise ValueError(f"reads[{idx}] must be a dict")
-
+            
+            #   NOTE: I made change here - to accept directory and read every ReadFile in the directory
             try:
-                # Get filename - can be string or dict
-                if isinstance(read_entry.get('filename'), dict):
-                    filename = read_entry['filename'].get('filename')
-                else:
-                    filename = read_entry.get('filename')
+                # Get filename or directory
+                directory = read_entry.get('directory')
+                filename = read_entry.get('filename')
 
-                if not filename:
-                    raise ValueError("'filename' field is required")
+                if not (filename or directory):
+                    raise ValueError("'filename' or 'directory' field is required")
 
                 ngs_type = read_entry.get('ngs_type', 'illumina')
 
                 # Extract extra keys
                 extra = {k: v for k, v in read_entry.items()
-                        if k not in ['filename', 'ngs_type']}
+                        if k not in ['filename', 'directory', 'ngs_type']}
 
                 # Warn about extra fields
                 if extra:
                     logger.warning(
                         f"reads[{idx}]: Found extra fields that will be ignored: {list(extra.keys())}"
                     )
+                #   NOTE: I made changes here to iter directory files
+                if filename:
+                    # Resolve absolute path and filename
+                    filepath = config.config_dir / filename
+                    filename = filepath.name
+                    exts = filepath.suffixes
 
-                # Resolve absolute path and filename
-                filepath = config.config_dir / filename
-                filename = filepath.name
-                exts = filepath.suffixes
+                    # Determine coding type (compression) from extensions
+                    coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
+                    coding_type = CodingType(coding_str) if coding_str else CodingType('')
 
-                # Determine coding type (compression) from extensions
-                coding_str = exts[-1][1:] if len(exts) > 1 else ''
-                coding_type = CodingType(coding_str) if coding_str else CodingType('')
+                    # Determine format from first extension (e.g., .fastq, .fq)
+                    format_str = exts[0] if exts else ''
+                    detected_format = ReadFormat(format_str)
 
-                # Determine format from first extension (e.g., .fastq, .fq)
-                format_str = exts[0] if exts else ''
-                detected_format = ReadFormat(format_str)
+                    read_config = ReadConfig(
+                        filename=filename,
+                        filepath=filepath,
+                        ngs_type=ngs_type,
+                        coding_type=coding_type,
+                        detected_format=detected_format,
+                        extra=extra
+                    )
+                    config.reads.append(read_config)
+                
+                if directory:
+                    from os import listdir
+                    #   resolve absolute path directory
+                    dirpath = config.config_dir / directory
+                    if not dirpath.exists():
+                        raise ValidationFileNotFoundError(
+                            f"The directory was not found\n"
+                        )
+                    files = dirpath.iterdir()
+                    for file in files:
+                        filename = file.name
+                        filepath = file
+                        exts = filepath.suffixes
+                        
+                        #   TODO: it determines "tar.gz" as GZIP, not as TGZ coding 
+                        # Determine coding type (compression) from extensions
+                        coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
+                        print(coding_str)
+                        coding_type = CodingType(coding_str) if coding_str else CodingType('')
 
-                read_config = ReadConfig(
-                    filename=filename,
-                    filepath=filepath,
-                    ngs_type=ngs_type,
-                    coding_type=coding_type,
-                    detected_format=detected_format,
-                    extra=extra
-                )
-                config.reads.append(read_config)
+                        # Determine format from first extension (e.g., .fastq, .fq)
+                        format_str = exts[0] if exts else ''
+                        detected_format = ReadFormat(format_str)
+                    
+                        read_config = ReadConfig(
+                            filename=filename,
+                            filepath=filepath,
+                            ngs_type=ngs_type,
+                            coding_type=coding_type,
+                            detected_format=detected_format,
+                            extra=extra
+                        )
+                        config.reads.append(read_config)
+            
             except ValueError as e:
                 raise ValueError(f"Invalid reads[{idx}]: {e}")
     
@@ -395,7 +430,7 @@ class ConfigManager:
         exts = filepath.suffixes
 
         # Determine coding type (compression) from extensions
-        coding_str = exts[-1][1:] if len(exts) > 1 else ''
+        coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
         coding_type = CodingType(coding_str) if coding_str else CodingType('')
 
         # Determine format from first extension (e.g., .gtf, .gff, .bed)

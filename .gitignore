@@ -20,6 +20,8 @@ venv/
 
 #   Other
 tmp
+logs
+**/output/**
 
 #   Claude AI
 .mcp.json

@@ -1,15 +1,17 @@
 # Configuration File — Specification & Guide
 
-This document defines the **JSON** configuration that `coordinator.py` consumes to understand your inputs (what’s reference vs. modified; genome vs. features vs. reads) and to validate them robustly.
+This document defines the **JSON** configuration that `config_manager.py` consumes to understand your inputs (what’s reference vs. modified; genome vs. features vs. reads) and to validate the values given by you.
 
 ---
 
 ## Quick overview
 
+- **Name:** Configuration file is to be named `config.json`
+- **Location:** Expected to be in directory together with your input files
 - **Format:** JSON (UTF-8)
 - **Purpose:** Tell where to find the reference/modified genomes, reads, and optional plasmids & features.
 - **Who creates it:** User, Modification Applier
-- **Who reads it:** `Coordinator.load("config.json")` (and maybe EFSA)
+- **Who reads it:** `ConfigManager` (and maybe EFSA)
 
 ---
 
@@ -24,12 +26,10 @@ This document defines the **JSON** configuration that `coordinator.py` consumes 
 | `reads` | ReadConfig | ✅ | **At least one** read input. See “Reads structure” below. |
 | `ref_feature_filename` | FeatureConfig | ❌ | Features for the **reference genome** (BED, GFF or GTF). |
 | `mod_feature_filename` | FeatureConfig | ❌ | Features for the **modified genome** (BED, GFF or GTF). |
-| `options` | object | ❌ | Free-form extra knobs (e.g., `{"threads": 8}`) - not implemented yet. |
-
-- **GenomeConfig**
+| `options` | dict | ❌ | Free-form extra knobs (e.g., `{"threads": 8}`) - **NOT IMPLEMENTED**. |
 
 
-> ℹ️ **Paths** must be relative to the **config directory** where your configuration file is.
+> ℹ️ **WARNING:** **Paths** must be relative to the **config directory** where your configuration file is.
 
 ---
 
@@ -37,30 +37,28 @@ This document defines the **JSON** configuration that `coordinator.py` consumes 
 
 - **Genomes & plasmids:** `.fa`, `.fasta`, `.fna` → FASTA; `.gb`, `.gbk`, `.genbank` → GenBank  
 - **Features:** `.gff`, `.gff3` → GFF; `.gtf` → GTF; `.bed` → BED
-- **Reads:** `.fastq`, `.fq`, `.bam` → FASTQ
+- **Reads:** `.fastq`, `.fq` → FASTQ; `.bam` → BAM
 
 ---
 
-## Output compression (coding)
+## Input compression (coding)
 
-All file-type or directory-type entries may include an optional `output_coding` field to control how the results will be stored.  
-If omitted, `"none"` (uncompressed) is assumed.
+All file-type or directory-type entries may be compressed and packed with following technologies
 
 Allowed values:
 
-- `"gz"` — gzip compression (`.gz`)
-- `"bzip"` — bzip2 compression (`.bz2`)
-- `"tgz"` — tar + gzip archive (`.tgz`)
-- `"none"` — uncompressed (default when the `output_coding` is not included)
+- `"GZIP"` — gzip compression (`.gz`,`.gzip`)
+- `"BZIP"` — bzip2 compression (`.bz2`,`.bzip2`)
+- `"TGZ"` — tar + gzip archive (`.tgz`, `.tar.gz`)
 
 ---
 ## Genome Config
-Each entry is **an object**: include `filename`. May also include `output_coding` field.
+Each entry is **an object**: include `filename`.
 
 
 Example:
 ```json
-"ref_genome_filename": {"filename":"data/reference.gbk", "output_coding": "gz"}
+"ref_genome_filename": {"filename":"data/reference.gbk"}
 ```
 
 ---
@@ -77,18 +75,10 @@ Each entry is **an object**: include `filename` and `ngs_type`.
 
 ####  b) directory-type path
 
-`reads` must be a **non-empty list** or **directory path**. Each entry is **an object**: include `filename` and `ngs_type`.
+`reads` must be a **non-empty list** or **directory path**. Each entry is **an object**: include `directory` and `ngs_type`.
 ```json
 "reads": [
   { "directory": "samples/", "ngs_type": "illumina" },
-]
-```
-
-####  Every record in Reads config may have output coding requirements
-```json
-"reads": [
-  { "filename": "samples/reads_R1.fastq.gz", "ngs_type": "illumina", "output_coding": "gz" },
-  { "filename": "samples/reads_R2.fastq.gz", "ngs_type": "illumina" }
 ]
 ```
 
@@ -98,14 +88,16 @@ Each entry is **an object**: include `filename` and `ngs_type`.
 - `"ont"` — Oxford Nanopore
 - `"pacbio"` — PacBio
 
+> ℹ️ **WARNING: If the read file in format BAM is given, the ngs_type will be deprecated onto pacbio**
+
 ---
 ## Feature Config
-Each entry is **an object**: include `filename`. May also include `output_coding` field.
+Each entry is **an object**: include `filename`.
 
 
 Example:
 ```json
-"ref_feature_filename": {"filename":"data/reference.gbk", "output_coding": "gz"}
+"ref_feature_filename": {"filename":"data/reference.gbk"}
 ```
 
 ---
@@ -114,4 +106,4 @@ Example:
 1. `ref_genome_filename` and `mod_genome_filename` must exist.
 2. `reads` must be non-empty.
 3. All paths must exist or be accessible (but it will be checked).
-4. File extensions determine format.
+4. File extensions determine format and coding type

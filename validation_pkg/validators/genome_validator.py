@@ -68,7 +68,6 @@ class GenomeValidator:
         plasmid_split: bool = True
         sequence_prefix: Optional[str] = None
         min_sequence_length: int = 100
-        convert_to_uppercase: bool = False
         check_duplicate_ids: bool = True
 
         # Validation thresholds
@@ -303,7 +302,6 @@ class GenomeValidator:
 
         Applies the following edits (if enabled in settings):
         - Remove short sequences (min_sequence_length)
-        - Convert to uppercase (convert_to_uppercase)
         - Add sequence prefix (sequence_prefix)
         - Check for duplicate IDs (check_duplicate_ids)
         """
@@ -324,13 +322,7 @@ class GenomeValidator:
                     details={'min_length': min_length, 'removed_count': removed}
                 )
 
-        # 2. Convert to uppercase
-        if self.settings.convert_to_uppercase:
-            for record in self.sequences:
-                record.seq = record.seq.upper()
-            self.logger.debug("Converted all sequences to uppercase")
-
-        # 3. Add sequence prefix
+        # 2. Add sequence prefix
         if self.settings.sequence_prefix:
             prefix = self.settings.sequence_prefix
             for record in self.sequences:
@@ -340,7 +332,7 @@ class GenomeValidator:
                 record.name = record.id
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
-        # 4. Check for duplicate IDs
+        # 3. Check for duplicate IDs
         if self.settings.check_duplicate_ids:
             seq_ids = [record.id for record in self.sequences]
             if len(seq_ids) != len(set(seq_ids)):
