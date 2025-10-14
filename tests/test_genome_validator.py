@@ -20,7 +20,7 @@ from validation_pkg.exceptions import (
     CompressionError,
     FileNotFoundError as ValidationFileNotFoundError
 )
-from validation_pkg.utils import globals
+from validation_pkg.utils import settings
 
 
 class TestGenomeValidator:
@@ -35,7 +35,7 @@ class TestGenomeValidator:
     @pytest.fixture
     def output_dir(self, temp_dir):
         """Create output directory."""
-        out_dir = temp_dir / globals.output_base_dir
+        out_dir = temp_dir / settings.output_base_dir
         out_dir.mkdir()
         return out_dir
     
@@ -118,7 +118,7 @@ class TestGenomeValidator:
             filepath=simple_fasta
         )
         
-        validator = GenomeValidator(genome_config,output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config,output_dir,settings.genome_settings)
         
         assert validator.input_path == simple_fasta
         assert validator.output_dir.exists()
@@ -132,7 +132,7 @@ class TestGenomeValidator:
             filepath=temp_dir / "nonexistent.fasta"
         )
         
-        validator = GenomeValidator(genome_config,output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config,output_dir,settings.genome_settings)
         
         with pytest.raises(ValidationFileNotFoundError):
             validator.validate()
@@ -144,7 +144,7 @@ class TestGenomeValidator:
             filepath=simple_fasta
         )
         
-        validator = GenomeValidator(genome_config, output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config, output_dir,settings.genome_settings)
         validator._check_file_exists()
         validator._detect_compression()
         validator._detect_format()
@@ -173,7 +173,7 @@ class TestGenomeValidator:
             filepath=compressed_fasta_gz
         )
         
-        validator = GenomeValidator(genome_config, output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config, output_dir,settings.genome_settings)
         validator._check_file_exists()
         validator._detect_compression()
         
@@ -187,7 +187,7 @@ class TestGenomeValidator:
             filepath=compressed_fasta_bz2
         )
         
-        validator = GenomeValidator(genome_config, output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config, output_dir,settings.genome_settings)
         validator._check_file_exists()
         validator._detect_compression()
         
@@ -201,7 +201,7 @@ class TestGenomeValidator:
             filepath=simple_fasta
         )
         
-        validator = GenomeValidator(genome_config, output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config, output_dir,settings.genome_settings)
         validator._check_file_exists()
         validator._detect_compression()
         validator._detect_format()
@@ -234,7 +234,7 @@ class TestGenomeValidator:
             filepath=compressed_fasta_gz
         )
         
-        validator = GenomeValidator(genome_config, output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config, output_dir,settings.genome_settings)
         validator._check_file_exists()
         validator._detect_compression()
         validator._detect_format()
@@ -249,7 +249,7 @@ class TestGenomeValidator:
             filepath=invalid_fasta
         )
         
-        validator = GenomeValidator(genome_config, output_dir,globals.genome_settings)
+        validator = GenomeValidator(genome_config, output_dir,settings.genome_settings)
         validator._check_file_exists()
         validator._detect_compression()
         validator._detect_format()
@@ -284,7 +284,7 @@ class TestGenomeValidator:
             filepath=simple_fasta
         )
         
-        settings = globals.genome_settings
+        settings = settings.genome_settings
         settings["output"]['coding_type'] = None
         
         validator = GenomeValidator(genome_config, output_dir, settings)

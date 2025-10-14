@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
 # Import logging and exceptions
-from validation_pkg.utils import globals
+from validation_pkg.utils import settings
 from validation_pkg.logger import get_logger
 from validation_pkg.exceptions import (
     ConfigurationError,
@@ -188,7 +188,6 @@ class Coordinator:
             logger.debug("Validating file existence...")
             Coordinator._validate_file_existence(config)
             logger.debug("Setup output directory...")
-            Coordinator._setup_output_dir(config,globals.output_dir_name)
             
             logger.info("✓ Configuration loaded and validated successfully")
             return config
@@ -240,16 +239,14 @@ class Coordinator:
     def _parse_genome_config(value: Any, field_name: str, config_dir: Path) -> GenomeConfig:
         """Parse a single genome config entry and resolve paths."""
         filename = None
-        extra = {}
-        
+        extra = {}  
         if isinstance(value, dict):
             if 'filename' not in value:
                 raise ValueError(f"{field_name} must contain 'filename' field")
             filename = value['filename']
             
             # Store any extra keys
-            extra = {k: v for k, v in value.items() if k not in ['filename']}
-            
+            extra = {k: v for k, v in value.items() if k not in ['filename']}   
         elif isinstance(value, str):
             # Accept plain string for backwards compatibility
             filename = value
@@ -262,8 +259,7 @@ class Coordinator:
         return GenomeConfig(
             filename=filename,
             filepath=filepath,
-            extra=extra
-        )
+            extra=extra)
     
     @staticmethod
     def _parse_read_configs(data: dict, config: Config):
@@ -419,8 +415,6 @@ class Coordinator:
         
         return any(name.endswith(ext) for ext in allowed_extensions)
     
-    @staticmethod
-    def _setup_output_dir(config: Config, dirname: str):
         """
         Setup output path by default on tmp path
         """

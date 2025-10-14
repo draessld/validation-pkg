@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
+# ===== GLOBALS =====
+output_dir_name = "output"
+
+
+# ===== Validator settings =====
 class ValidatorSettings:
     """
     Centralized settings for all validators.
