@@ -189,7 +189,6 @@ class ReadValidator:
     
     def _parse_file(self):
         """Parse file using BioPython and validate format from read_config."""
-        format_str = str(self.read_config.detected_format)
         self.logger.debug(f"Parsing {self.read_config.detected_format} file...")
 
         # BAM files: just copy to output location without processing
@@ -206,7 +205,7 @@ class ReadValidator:
         try:
             with self._open_file() as handle:
                 # Parse using BioPython - convert ReadFormat to BioPython format string
-                biopython_format = self.read_config.detected_format.lower().replace('readformat.', '')
+                biopython_format = str(self.read_config.detected_format).lower().replace('readformat.', '')
                 self.sequences = list(SeqIO.parse(handle, biopython_format))
 
             # Validate we got sequences
@@ -230,9 +229,9 @@ class ReadValidator:
         except Exception as e:
             error_msg = f"Failed to parse {self.read_config.detected_format} file: {e}"
 
-            if 'fastq' in self.read_config.detected_format.lower():
+            if self.read_config.detected_format == ReadFormat.FASTQ:
                 exception_class = FastqFormatError
-            elif 'bam' in self.read_config.detected_format.lower() or 'gb' in self.read_config.detected_format.lower():
+            elif self.read_config.detected_format == ReadFormat.BAM :
                 exception_class = BamFormatError
             else:
                 exception_class = FileFormatError
@@ -243,7 +242,7 @@ class ReadValidator:
                 message=error_msg,
                 details={
                     'file': self.read_config.filename,
-                    'format': format_str,
+                    'format': self.read_config.detected_format,
                     'error': str(e)
                 }
             )
@@ -415,13 +414,11 @@ class ReadValidator:
         Raises:
             ReadValidationError: If conversion fails or required tools are not available
         """
-        format_str = str(self.read_config.detected_format).lower()
-
-        if 'fastq' in format_str:
+        if self.read_config.detected_format == ReadFormat.FASTQ:
             self.logger.debug("Already in FASTQ format")
             return
 
-        self.logger.debug(f"Converting from {format_str} to FASTQ...")
+        self.logger.debug(f"Converting from {self.read_config.detected_format} to FASTQ...")
 
         if self.read_config.detected_format == ReadFormat.BAM:
             self._convert_bam_to_fastq()
@@ -429,8 +426,8 @@ class ReadValidator:
             self.logger.add_validation_issue(
                 level='WARNING',
                 category='read',
-                message=f"Conversion from {format_str} to FASTQ not implemented",
-                details={'format': format_str}
+                message=f"Conversion from {self.read_config.detected_format} to FASTQ not implemented",
+                details={'format': self.read_config.detected_format}
             )
 
         self.logger.debug("✓ Ready for FASTQ output")

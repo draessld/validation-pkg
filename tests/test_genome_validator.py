@@ -202,7 +202,7 @@ class TestGenomeValidatorParsing:
 
         validator = GenomeValidator(genome_config, output_dir, default_settings)
 
-        with pytest.raises(GenomeValidationError, match="No sequences found"):
+        with pytest.raises(FastaFormatError, match="No sequences found"):
             validator.validate()
 
     def test_parse_invalid_fasta_raises_error(self, invalid_fasta, output_dir, default_settings):
@@ -366,7 +366,7 @@ class TestGenomeValidatorValidation:
 
         validator = GenomeValidator(genome_config, output_dir, settings)
 
-        with pytest.raises(GenomeValidationError, match="Duplicate sequence IDs"):
+        with pytest.raises(FastaFormatError, match="Duplicate sequence IDs"):
             validator.validate()
 
     def test_invalid_chars_detected(self, fasta_with_invalid_chars, output_dir):
@@ -382,7 +382,7 @@ class TestGenomeValidatorValidation:
 
         validator = GenomeValidator(genome_config, output_dir, settings)
 
-        with pytest.raises(GenomeValidationError, match="invalid chars"):
+        with pytest.raises(FastaFormatError, match="invalid chars"):
             validator.validate()
 
     def test_invalid_chars_ignored_by_default(self, fasta_with_invalid_chars, output_dir, default_settings):
@@ -409,7 +409,7 @@ class TestGenomeValidatorValidation:
 
         validator = GenomeValidator(genome_config, output_dir, default_settings)
 
-        with pytest.raises(GenomeValidationError, match="zero length"):
+        with pytest.raises(FastaFormatError, match="zero length"):
             validator.validate()
 
 

@@ -176,7 +176,7 @@ class TestReadValidatorParsing:
 
         validator = ReadValidator(read_config, output_dir)
 
-        with pytest.raises(ReadValidationError, match="No sequences found"):
+        with pytest.raises(FastqFormatError, match="No sequences found"):
             validator.validate()
 
     def test_parse_invalid_fastq_raises_error(self, invalid_fastq, output_dir):
@@ -334,7 +334,7 @@ class TestReadValidatorValidation:
 
         validator = ReadValidator(read_config, output_dir, settings)
 
-        with pytest.raises(ReadValidationError, match="Duplicate sequence IDs"):
+        with pytest.raises(FastqFormatError, match="Duplicate sequence IDs"):
             validator.validate()
 
     def test_invalid_chars_detected(self, fastq_with_invalid_chars, output_dir):
@@ -351,7 +351,7 @@ class TestReadValidatorValidation:
 
         validator = ReadValidator(read_config, output_dir, settings)
 
-        with pytest.raises(ReadValidationError, match="invalid chars"):
+        with pytest.raises(FastqFormatError, match="invalid chars"):
             validator.validate()
 
     def test_invalid_chars_ignored_by_default(self, fastq_with_invalid_chars, output_dir):
@@ -490,11 +490,11 @@ class TestReadValidatorOutput:
     def simple_fastq(self, temp_dir):
         """Create a simple FASTQ file."""
         fastq_file = temp_dir / "reads.fastq"
-        with open(fastq_file, "w") as f:
-            f.write("@read1\n")
+        with open(fastq_file, "w", encoding="ascii", newline="\n") as f:
+            f.write("@@read1 length=20\n")
             f.write("ATCGATCGATCGATCGATCG\n")
-            f.write("+\n")
-            f.write("IIIIIIIIIIIIIIIIIIII\n")
+            f.write("+\n")                      # <- no trailing text
+            f.write("IIIIIIIIIIIIIIIIIIII\n")   # len = 20
         return fastq_file
 
     def test_output_uncompressed(self, simple_fastq, output_dir):
@@ -716,7 +716,7 @@ class TestReadValidatorEdgeCases:
             f.write("@read1\n")
             f.write("ATCGATCGATCGATCGATCG\n")
             f.write("+\n")
-            f.write("!!!!!!!!!!!!!!!!!!!\n")  # Quality score 0
+            f.write("!!!!!!!!!!!!!!!!!!!!\n")  # Quality score 0
         return fastq_file
 
     def test_varying_read_lengths(self, fastq_with_varying_lengths, output_dir):
