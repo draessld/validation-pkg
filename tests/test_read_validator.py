@@ -351,7 +351,7 @@ class TestReadValidatorValidation:
 
         validator = ReadValidator(read_config, output_dir, settings)
 
-        with pytest.raises(FastqFormatError, match="invalid chars"):
+        with pytest.raises(FastqFormatError, match="invalid character"):
             validator.validate()
 
     def test_invalid_chars_ignored_by_default(self, fastq_with_invalid_chars, output_dir):

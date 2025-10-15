@@ -5,7 +5,7 @@ Handles FASTA and GenBank formats with compression support.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, IO
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -31,47 +31,37 @@ class GenomeValidator:
 
     Workflow:
     1. Detect and handle compression
-    2. Detect file format
-    3. Parse and validate using BioPython
-    4. Apply editing specifications
-    5. Convert to FASTA format
-    6. Compress if requested
-    7. Save to output directory
+    2. Parse and validate using BioPython
+    3. Apply editing specifications
+    4. Convert to FASTA format
+    5. Compress if requested
+    6. Save to output directory
     """
 
     @dataclass
     class Settings(BaseSettings):
         """
         Settings for genome validation and processing.
-        #   TODO: update attributes
         Attributes:
-            plasmid_split: Separate plasmid sequences into different file (default: True)
-            sequence_prefix: Prefix to add to sequence IDs, None = no prefix (default: None)
-            min_sequence_length: Minimum sequence length to keep in bp (default: 100)
-            convert_to_uppercase: Convert all sequences to uppercase (default: False)
-            check_duplicate_ids: Check for and warn about duplicate sequence IDs (default: True)
+            allow_empty_sequences: Allow SeqRecord empty seequence (default: False) 
+            allow_empty_id: Allow SeqRecord empty ID (default: False)
             warn_n_sequences: Warn if number of sequences exceeds this (default: 2)
-            allow_duplicate_ids: Allow duplicate sequence IDs, just warn (default: True)
+            plasmid_split: Separate plasmid sequences into different file (default: True)
+            replace_id_with: Prefix to add to sequence IDs, None = no prefix (default: None)
+            min_sequence_length: Minimum sequence length to keep in bp, remove shorter (default: 100)
             coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
             output_filename_suffix: Suffix to add to output filename (default: None)
             output_subdir_name: Subdirectory name for output files (default: None)
-
-        Example:
-            >>> settings = GenomeValidator.Settings()
-            >>> print(settings)  # View all settings
-            >>> ref_settings = settings.update(sequence_prefix="chr1", output_filename_suffix="ref")
-            >>> validator = GenomeValidator(genome_config, output_dir, ref_settings)
         """
+
         # Validation thresholds
-        allow_empty_sequences: bool = False
-        allow_empty_id: bool = False
-        warn_n_sequences: int = 2
-        check_invalid_chars: bool = False
-        allow_duplicate_ids: bool = True
+        allow_empty_sequences: bool = False #   Raise ERROR
+        allow_empty_id: bool = False    #   Raise ERROR
+        warn_n_sequences: int = 2   #   Raise Warning - set plasmid_split to True
 
         # Editing specifications
-        plasmid_split: bool = True
-        sequence_prefix: Optional[str] = None
+        plasmid_split: bool = True 
+        replace_id_with: Optional[str] = None 
         min_sequence_length: int = 100
 
         # Output format
@@ -79,7 +69,7 @@ class GenomeValidator:
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
 
-    def __init__(self, genome_config, output_dir, settings: Optional[Settings] = None):
+    def __init__(self, genome_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
         """
         Initialize genome validator.
 
@@ -92,7 +82,7 @@ class GenomeValidator:
 
         Example:
             >>> settings = GenomeValidator.Settings()
-            >>> settings = settings.update(sequence_prefix="chr1")
+            >>> settings = settings.update(replace_id_with="chr1")
             >>> validator = GenomeValidator(genome_config, output_dir, settings)
         """
         self.logger = get_logger()
@@ -119,7 +109,7 @@ class GenomeValidator:
             'avg_length': 0.0
         }
     
-    def validate(self):
+    def validate(self) -> None:
         """
         Main validation and processing workflow.
 
@@ -157,11 +147,11 @@ class GenomeValidator:
             self.logger.error(f"Genome validation failed: {e}")
             raise
 
-    def _open_file(self, mode='rt'):
+    def _open_file(self, mode: str = 'rt') -> IO:
         """
         Open file with automatic decompression based on genome_config.
 
-        Note: File compression handling will be moved to utils/file_handler.py in future.
+        Uses centralized file opening from file_handler.py to eliminate code duplication.
 
         Args:
             mode: File opening mode (default: 'rt' for text read)
@@ -173,44 +163,39 @@ class GenomeValidator:
             CompressionError: If file cannot be opened or decompressed
         """
         try:
-            coding_type_str = str(self.genome_config.coding_type).lower()
-
-            if 'gzip' in coding_type_str or coding_type_str == 'gz':
-                return gzip.open(self.input_path, mode)
-            elif 'bzip2' in coding_type_str or coding_type_str == 'bz2':
-                return bz2.open(self.input_path, mode)
-            else:
-                # No compression or unrecognized
-                return open(self.input_path, mode)
-        except Exception as e:
-            error_msg = f"Failed to open file: {e}"
+            from validation_pkg.utils.file_handler import open_file_with_coding_type
+            return open_file_with_coding_type(
+                self.input_path,
+                self.genome_config.coding_type,
+                mode
+            )
+        except CompressionError as e:
             self.logger.add_validation_issue(
                 level='ERROR',
                 category='genome',
-                message=error_msg,
-                details={'file': str(self.input_path), 'error': str(e)}
+                message=str(e),
+                details={'file': str(self.input_path)}
             )
-            raise CompressionError(error_msg) from e
+            raise
     
-    def _parse_file(self):
+    def _parse_file(self) -> None:
         """Parse file using BioPython and validate format from genome_config."""
-        format_str = str(self.genome_config.detected_format)
-        self.logger.debug(f"Parsing {format_str} file...")
+        self.logger.debug(f"Parsing {self.genome_config.detected_format} file...")
 
         try:
             with self._open_file() as handle:
-                # Parse using BioPython - convert GenomeFormat to BioPython format string
-                biopython_format = format_str.lower().replace('genomeformat.', '')
+                # Parse using BioPython with clean enum conversion
+                biopython_format = self.genome_config.detected_format.to_biopython()
                 self.sequences = list(SeqIO.parse(handle, biopython_format))
 
             # Validate we got sequences
             if not self.sequences:
-                error_msg = f"No sequences found in {format_str} file"
+                error_msg = f"No sequences found in {self.genome_config.detected_format} file"
                 self.logger.add_validation_issue(
                     level='ERROR',
                     category='genome',
                     message=error_msg,
-                    details={'file': self.genome_config.filename, 'format': format_str}
+                    details={'file': self.genome_config.filename, 'format': str(self.genome_config.detected_format)}
                 )
                 raise GenomeValidationError(error_msg)
 
@@ -222,11 +207,13 @@ class GenomeValidator:
         except FileFormatError:
             raise
         except Exception as e:
-            error_msg = f"Failed to parse {format_str} file: {e}"
+            error_msg = f"Failed to parse {self.genome_config.detected_format} file: {e}"
 
-            if 'fasta' in format_str.lower():
+            # Determine exception type based on format using enum
+            from validation_pkg.utils.formats import GenomeFormat
+            if self.genome_config.detected_format == GenomeFormat.FASTA:
                 exception_class = FastaFormatError
-            elif 'genbank' in format_str.lower() or 'gb' in format_str.lower():
+            elif self.genome_config.detected_format == GenomeFormat.GENBANK:
                 exception_class = GenBankFormatError
             else:
                 exception_class = FileFormatError
@@ -237,27 +224,38 @@ class GenomeValidator:
                 message=error_msg,
                 details={
                     'file': self.genome_config.filename,
-                    'format': format_str,
+                    'format': str(self.genome_config.detected_format),
                     'error': str(e)
                 }
             )
             raise exception_class(error_msg) from e
     
-    def _validate_sequences(self):
+    def _validate_sequences(self) -> None:
         """Validate parsed sequences."""
         self.logger.debug("Validating sequences...")
         
+        # Warn about number of sequences
+        if len(self.sequences) >= self.settings.warn_n_sequences:
+            self.logger.add_validation_issue(
+                level='WARNING',
+                category='genome',
+                message=f"High number of sequences: {len(self.sequences)}",
+                details={
+                    'num_sequences': len(self.sequences),
+                    'threshold': self.settings.warn_n_sequences
+                }
+            )
+
         for idx, record in enumerate(self.sequences):
             # Check sequence ID
             if not record.id and not self.settings.allow_empty_id:
-                error_msg = f"Sequence '{record.id}' has no ID"
-                if not record.id:
-                    self.logger.add_validation_issue(
-                        level='ERROR',
-                        category='genome',
-                        message=f'Sequence {idx} has no ID',
-                        details={'sequence_index': idx}
-                    )
+                error_msg = f"Sequence at index {idx} has no ID"
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='genome',
+                    message=error_msg,
+                    details={'sequence_index': idx, 'sequence_id': str(record.id)}
+                )
                 raise GenomeValidationError(error_msg)
             
             # Check sequence length
@@ -271,49 +269,16 @@ class GenomeValidator:
                 )
                 raise GenomeValidationError(error_msg)
             
-            # Check for valid nucleotides
-            if self.settings.check_invalid_chars:
-                valid_chars = set('ATCGNatcgn')
-                seq_str = str(record.seq)
-                invalid_chars = set(seq_str) - valid_chars
-
-                if invalid_chars:
-                    error_msg = f"Sequence '{record.id}' has contains invalid chars"
-                    self.logger.add_validation_issue(
-                        level='ERROR',
-                        category='genome',
-                        message=f"Sequence '{record.id}' contains non-standard characters",
-                        details={
-                            'sequence_id': record.id,
-                            'invalid_chars': list(invalid_chars),
-                            'count': sum(1 for c in seq_str if c in invalid_chars)
-                        }
-                    )
-                    raise GenomeValidationError(error_msg)
-
-        # 3. Check for duplicate IDs
-        if not self.settings.allow_duplicate_ids:
-            seq_ids = [record.id for record in self.sequences]
-            if len(seq_ids) != len(set(seq_ids)):
-                duplicates = [sid for sid in seq_ids if seq_ids.count(sid) > 1]
-                self.logger.add_validation_issue(
-                    level='ERROR',
-                    category='genome',
-                    message=f'Duplicate sequence IDs found',
-                    details={'duplicate_ids': list(set(duplicates))}
-                )
-                if not self.settings.allow_duplicate_ids:
-                    raise GenomeValidationError(f"Duplicate sequence IDs not allowed: {list(set(duplicates))}")
         
         self.logger.debug("✓ Sequence validation passed")
     
-    def _apply_edits(self):
+    def _apply_edits(self) -> None:
         """
         Apply editing specifications to sequences based on settings.
 
         Applies the following edits (if enabled in settings):
         - Remove short sequences (min_sequence_length)
-        - Add sequence prefix (sequence_prefix)
+        - Add sequence prefix (replace_id_with)
         - Check for duplicate IDs (check_duplicate_ids)
         """
         self.logger.debug("Applying editing specifications from settings...")
@@ -334,22 +299,21 @@ class GenomeValidator:
                 )
 
         # 2. Add sequence prefix
-        if self.settings.sequence_prefix:
-            prefix = self.settings.sequence_prefix
+        if self.settings.replace_id_with:
+            prefix = self.settings.replace_id_with
             for record in self.sequences:
                 # Add prefix to sequence ID
-                record.id = f"{prefix}_{record.id}"
-                # Also update the name field to match
-                record.name = record.id
+                record.description = f"{record.id}"
+                record.id = f"{prefix}"
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
         # 3. Split plasmid sequences
-        if self.settings.plasmid_split and len(self.sequences) > 2:
+        if self.settings.plasmid_split and len(self.sequences) > 1:
             self._split_plasmids()
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
 
-    def _split_plasmids(self):
+    def _split_plasmids(self) -> None:
         """
         Split plasmid sequences into a separate file.
 
@@ -373,13 +337,14 @@ class GenomeValidator:
             f"saving {len(plasmid_sequences)} sequence(s) as plasmids"
         )
 
-        # Save plasmid sequences to separate file
-        self._save_plasmid_file(plasmid_sequences)
+        for i,plasmid in enumerate(plasmid_sequences):
+            # Save plasmid sequences to separate file
+            self._save_plasmid_file(plasmid_sequences,i)
 
         # Update main sequences to only include chromosome
         self.sequences = main_sequence
 
-    def _save_plasmid_file(self, plasmid_sequences: List[SeqRecord]):
+    def _save_plasmid_file(self, plasmid_sequences: SeqRecord, index: int) -> None:
         """
         Save plasmid sequences to a separate file.
 
@@ -402,9 +367,9 @@ class GenomeValidator:
 
         # Add plasmid suffix and optional user suffix
         if self.settings.output_filename_suffix:
-            plasmid_filename = f"{base_name}_{self.settings.output_filename_suffix}_plasmid.fasta"
+            plasmid_filename = f"{base_name}_{self.settings.output_filename_suffix}_plasmid{index}.fasta"
         else:
-            plasmid_filename = f"{base_name}_plasmid.fasta"
+            plasmid_filename = f"{base_name}_plasmid{index}.fasta"
 
         # Add compression extension if requested
         if self.settings.coding_type == 'gz':
@@ -433,7 +398,7 @@ class GenomeValidator:
         for seq in plasmid_sequences:
             self.logger.debug(f"  Plasmid: {seq.id} ({len(seq.seq)} bp)")
 
-    def _collect_statistics(self):
+    def _collect_statistics(self) -> None:
         """Collect statistics about the sequences and validate against thresholds."""
         self.logger.debug("Collecting statistics...")
 
@@ -462,29 +427,18 @@ class GenomeValidator:
         if total_bases > 0:
             self.statistics['gc_content'] = (total_gc / total_bases) * 100
 
-        # Warn about number of sequences
-        if len(self.sequences) > self.settings.warn_n_sequences:
-            self.logger.add_validation_issue(
-                level='WARNING',
-                category='genome',
-                message=f"High number of sequences: {len(self.sequences)}",
-                details={
-                    'num_sequences': len(self.sequences),
-                    'threshold': self.settings.warn_n_sequences
-                }
-            )
-
         self.logger.debug(f"Statistics: {self.statistics}")
     
-    def _convert_to_fasta(self):
+    def _convert_to_fasta(self) -> None:
         """Convert sequences to FASTA format (if not already)."""
-        format_str = str(self.genome_config.detected_format).lower()
+        # Check if already FASTA using enum comparison
+        from validation_pkg.utils.formats import GenomeFormat
 
-        if 'fasta' in format_str:
+        if self.genome_config.detected_format == GenomeFormat.FASTA:
             self.logger.debug("Already in FASTA format")
             return
 
-        self.logger.debug(f"Converting from {format_str} to FASTA...")
+        self.logger.debug(f"Converting from {self.genome_config.detected_format} to FASTA...")
 
         # BioPython SeqRecord objects can be written as FASTA directly
         # No conversion needed, just change the output format

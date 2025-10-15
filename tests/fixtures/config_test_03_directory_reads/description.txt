@@ -1,0 +1,4 @@
+Config Test Case 3: Directory-based reads
+- Reads specified as directory instead of individual files
+- Multiple read files in directory
+- Expected: Should load all files from directory

@@ -1,0 +1,5 @@
+Config Test Case 4: Compressed files
+- Gzip compressed reference genome
+- Bzip2 compressed modified genome
+- Gzip compressed reads
+- Expected: Should detect compression types and load successfully

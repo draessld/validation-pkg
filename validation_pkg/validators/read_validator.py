@@ -5,7 +5,7 @@ Handles FASTQ and BAM formats with compression support.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, IO
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -59,20 +59,21 @@ class ReadValidator:
             >>> ref_settings = settings.update(sequence_prefix="chr1", output_filename_suffix="ref")
             >>> validator = ReadValidator(read_config, output_dir, ref_settings)
         """
+        #   TODO nerozbalovat, zkontrolovat povrchne - release/debug mode
         # Validation thresholds
-        check_invalid_chars: bool = False
-        allow_empty_id: bool = False
-        allow_duplicate_ids: bool = True
+        check_invalid_chars: bool = False # TODO: remove
+        allow_empty_id: bool = False    # TODO: remove
+        allow_duplicate_ids: bool = True    # TODO: remove
 
         # Editing specifications
-        keep_bam: bool = True
+        keep_bam: bool = True   # TODO: Keep it, but wont be used - deprecated by ERROR, that we do not support BAM
 
         # Output format
         coding_type: Optional[str] = None
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
 
-    def __init__(self, read_config, output_dir, settings: Optional[Settings] = None):
+    def __init__(self, read_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
         """
         Initialize read validator.
 
@@ -112,7 +113,7 @@ class ReadValidator:
             'avg_length': 0.0
         }
     
-    def validate(self):
+    def validate(self) -> None:
         """
         Main validation and processing workflow.
 
@@ -174,11 +175,11 @@ class ReadValidator:
             self.logger.error(f"Read validation failed: {e}")
             raise
 
-    def _open_file(self, mode='rt'):
+    def _open_file(self, mode: str = 'rt') -> IO:
         """
         Open file with automatic decompression based on read_config.
 
-        Note: File compression handling will be moved to utils/file_handler.py in future.
+        Uses centralized file opening from file_handler.py to eliminate code duplication.
 
         Args:
             mode: File opening mode (default: 'rt' for text read)
@@ -190,25 +191,22 @@ class ReadValidator:
             CompressionError: If file cannot be opened or decompressed
         """
         try:
-            # Use enum comparison instead of string comparison
-            if self.read_config.coding_type == CodingType.GZIP:
-                return gzip.open(self.input_path, mode)
-            elif self.read_config.coding_type == CodingType.BZIP2:
-                return bz2.open(self.input_path, mode)
-            else:
-                # No compression or unknown
-                return open(self.input_path, mode)
-        except Exception as e:
-            error_msg = f"Failed to open file: {e}"
+            from validation_pkg.utils.file_handler import open_file_with_coding_type
+            return open_file_with_coding_type(
+                self.input_path,
+                self.read_config.coding_type,
+                mode
+            )
+        except CompressionError as e:
             self.logger.add_validation_issue(
                 level='ERROR',
                 category='read',
-                message=error_msg,
-                details={'file': str(self.input_path), 'error': str(e)}
+                message=str(e),
+                details={'file': str(self.input_path)}
             )
-            raise CompressionError(error_msg) from e
+            raise
     
-    def _parse_file(self):
+    def _parse_file(self) -> None:
         """
         Parse FASTQ file using BioPython and validate format from read_config.
 
@@ -221,8 +219,8 @@ class ReadValidator:
             # Open file with automatic decompression
             handle = self._open_file()
             try:
-                # Parse using BioPython
-                biopython_format = str(self.read_config.detected_format).lower().replace('readformat.', '')
+                # Parse using BioPython with clean enum conversion
+                biopython_format = self.read_config.detected_format.to_biopython()
                 self.sequences = list(SeqIO.parse(handle, biopython_format))
             finally:
                 handle.close()
@@ -267,21 +265,20 @@ class ReadValidator:
             )
             raise exception_class(error_msg) from e
     
-    def _validate_sequences(self):
+    def _validate_sequences(self) -> None:
         """Validate parsed sequences."""
         self.logger.debug("Validating sequences...")
         
         for idx, record in enumerate(self.sequences):
             # Check sequence ID
             if not record.id and not self.settings.allow_empty_id:
-                error_msg = f"Sequence '{record.id}' has no ID"
-                if not record.id:
-                    self.logger.add_validation_issue(
-                        level='ERROR',
-                        category='read',
-                        message=f'Sequence {idx} has no ID',
-                        details={'sequence_index': idx}
-                    )
+                error_msg = f"Sequence at index {idx} has no ID"
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='read',
+                    message=error_msg,
+                    details={'sequence_index': idx, 'sequence_id': str(record.id)}
+                )
                 raise ReadValidationError(error_msg)
             
             
@@ -292,15 +289,16 @@ class ReadValidator:
                 invalid_chars = set(seq_str) - valid_chars
 
                 if invalid_chars:
-                    error_msg = f"Sequence '{record.id}' has contains invalid chars"
+                    char_count = sum(1 for c in seq_str if c in invalid_chars)
+                    error_msg = f"Sequence '{record.id}' contains {char_count} invalid character(s): {', '.join(sorted(invalid_chars))}"
                     self.logger.add_validation_issue(
                         level='ERROR',
                         category='read',
-                        message=f"Sequence '{record.id}' contains non-standard characters",
+                        message=error_msg,
                         details={
                             'sequence_id': record.id,
                             'invalid_chars': list(invalid_chars),
-                            'count': sum(1 for c in seq_str if c in invalid_chars)
+                            'count': char_count
                         }
                     )
                     raise ReadValidationError(error_msg)
@@ -309,19 +307,19 @@ class ReadValidator:
         if not self.settings.allow_duplicate_ids:
             seq_ids = [record.id for record in self.sequences]
             if len(seq_ids) != len(set(seq_ids)):
-                duplicates = [sid for sid in seq_ids if seq_ids.count(sid) > 1]
+                duplicates = [sid for sid in set(seq_ids) if seq_ids.count(sid) > 1]
+                error_msg = f"Duplicate sequence IDs not allowed: {duplicates}"
                 self.logger.add_validation_issue(
                     level='ERROR',
                     category='read',
-                    message=f'Duplicate sequence IDs found',
-                    details={'duplicate_ids': list(set(duplicates))}
+                    message=error_msg,
+                    details={'duplicate_ids': duplicates}
                 )
-                if not self.settings.allow_duplicate_ids:
-                    raise ReadValidationError(f"Duplicate sequence IDs not allowed: {list(set(duplicates))}")
+                raise ReadValidationError(error_msg)
         
         self.logger.debug("✓ Sequence validation passed")
     
-    def _apply_edits(self):
+    def _apply_edits(self) -> None:
         """
         Apply editing specifications to sequences based on settings.
 
@@ -338,7 +336,7 @@ class ReadValidator:
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
     
-    def _collect_statistics(self):
+    def _collect_statistics(self) -> None:
         """
         Collect statistics about the sequences.
 
@@ -403,7 +401,7 @@ class ReadValidator:
 
         self.logger.debug(f"Statistics: {self.statistics}")
     
-    def _convert_bam_to_fastq(self):
+    def _convert_bam_to_fastq(self) -> None:
         """
         Convert BAM file to FASTQ format using pysam or samtools.
 
@@ -423,6 +421,18 @@ class ReadValidator:
             self.sequences = []
 
             with pysam.AlignmentFile(str(self.input_path), "rb") as bam_file:
+                # Try to get total read count for progress reporting
+                try:
+                    total_reads = bam_file.count(until_eof=True)
+                    bam_file.reset()  # Reset file pointer after counting
+                    self.logger.info(f"Processing {total_reads:,} reads from BAM file...")
+                    progress_interval = max(1, total_reads // 20)  # Report every 5%
+                except:
+                    # If counting fails, just proceed without progress reporting
+                    total_reads = None
+                    progress_interval = 100000  # Report every 100k reads
+
+                processed = 0
                 for read in bam_file:
                     # Skip unmapped or secondary/supplementary alignments
                     if read.is_unmapped or read.is_secondary or read.is_supplementary:
@@ -440,7 +450,16 @@ class ReadValidator:
                     )
                     self.sequences.append(record)
 
-            self.logger.info(f"Converted {len(self.sequences)} reads from BAM to FASTQ")
+                    processed += 1
+                    # Progress reporting
+                    if processed % progress_interval == 0:
+                        if total_reads:
+                            percent = (processed / total_reads) * 100
+                            self.logger.info(f"Progress: {processed:,}/{total_reads:,} reads ({percent:.1f}%)")
+                        else:
+                            self.logger.info(f"Progress: {processed:,} reads processed...")
+
+            self.logger.info(f"✓ Converted {len(self.sequences):,} reads from BAM to FASTQ")
             return
 
         except ImportError:

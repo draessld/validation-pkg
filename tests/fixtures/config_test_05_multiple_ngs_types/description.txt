@@ -1,0 +1,4 @@
+Config Test Case 5: Multiple NGS types
+- Three different NGS types: illumina, ont, pacbio
+- Tests handling of different sequencing platforms
+- Expected: Should load all read types correctly

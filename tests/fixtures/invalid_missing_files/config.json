@@ -1,7 +1,0 @@
-{
-  "ref_genome_filename": {"filename": "nonexistent_ref.fasta"},
-  "mod_genome_filename": {"filename": "nonexistent_mod.fasta"},
-  "reads": [
-    {"filename": "nonexistent_reads.fastq", "ngs_type": "illumina"}
-  ]
-}

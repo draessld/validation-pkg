@@ -1,0 +1,4 @@
+Config Test Case 10: Invalid NGS type
+- Config specifies invalid ngs_type '454'
+- Valid types are: illumina, ont, pacbio
+- Expected: Should raise ValueError about invalid ngs_type

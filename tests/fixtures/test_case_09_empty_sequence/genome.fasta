@@ -1,0 +1,6 @@
+>seq1 Valid sequence
+ATCGATCGATCGATCGATCG
+>empty_seq This sequence has no bases
+
+>seq3 Another valid sequence
+GCTAGCTAGCTAGCTAGCTA

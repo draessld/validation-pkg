@@ -1,0 +1,5 @@
+Config Test Case 1: Valid minimal configuration
+- All required fields present
+- Single read file
+- All files exist and are valid
+- Expected: Should load successfully

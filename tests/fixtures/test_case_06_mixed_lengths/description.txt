@@ -1,0 +1,4 @@
+Test Case 6: Mixed length sequences
+- Four sequences: 20bp, 50bp, 150bp, 300bp
+- Tests minimum length filtering
+- With min_sequence_length=100: Should keep only 150bp and 300bp sequences
