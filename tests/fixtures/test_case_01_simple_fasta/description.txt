@@ -1,0 +1,5 @@
+Test Case 1: Simple FASTA genome (uncompressed)
+- Single chromosome sequence
+- 180 bp total length
+- Uncompressed FASTA format
+- Expected: Should parse successfully and output valid FASTA

@@ -1,0 +1,4 @@
+Test Case 7: High GC content genome
+- 100% GC content sequence
+- Tests GC content calculation
+- Expected: Should report 100% GC content in statistics

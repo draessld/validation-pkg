@@ -70,7 +70,24 @@ class CodingType(Enum):
 class GenomeFormat(Enum):
     FASTA = "fasta"
     GENBANK = "genbank"
-    
+
+    def to_biopython(self) -> str:
+        """
+        Return format string for BioPython SeqIO.
+
+        BioPython expects lowercase format names like "fasta", "genbank".
+        This method provides a safe, explicit conversion instead of fragile
+        string manipulation.
+
+        Returns:
+            Format string compatible with BioPython SeqIO
+
+        Example:
+            >>> fmt = GenomeFormat.FASTA
+            >>> Bio.SeqIO.parse(file, fmt.to_biopython())
+        """
+        return self.value
+
     @classmethod
     def _missing_(cls, value):
         """
@@ -109,7 +126,24 @@ class GenomeFormat(Enum):
 class ReadFormat(Enum):
     FASTQ = "fastq"
     BAM = "bam"
-    
+
+    def to_biopython(self) -> str:
+        """
+        Return format string for BioPython SeqIO.
+
+        BioPython expects lowercase format names like "fastq", "bam".
+        This method provides a safe, explicit conversion instead of fragile
+        string manipulation like `str(format).lower().replace('readformat.', '')`.
+
+        Returns:
+            Format string compatible with BioPython SeqIO
+
+        Example:
+            >>> fmt = ReadFormat.FASTQ
+            >>> Bio.SeqIO.parse(file, fmt.to_biopython())
+        """
+        return self.value
+
     @classmethod
     def _missing_(cls, value):
         """
@@ -144,7 +178,23 @@ class ReadFormat(Enum):
 class FeatureFormat(Enum):
     GFF = "gff"
     BED = "bed"
-    
+
+    def to_biopython(self) -> str:
+        """
+        Return format string for file parsing.
+
+        Note: FeatureFormat doesn't use BioPython, but we provide this method
+        for API consistency with GenomeFormat and ReadFormat.
+
+        Returns:
+            Format string ("gff" or "bed")
+
+        Example:
+            >>> fmt = FeatureFormat.GFF
+            >>> format_name = fmt.to_biopython()  # "gff"
+        """
+        return self.value
+
     @classmethod
     def _missing_(cls, value):
         """

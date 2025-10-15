@@ -1,0 +1,4 @@
+Test Case 9: Empty sequence (should fail validation)
+- Contains one empty sequence
+- Tests validation of sequence length
+- Expected: Should raise GenomeValidationError for empty sequence

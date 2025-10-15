@@ -14,7 +14,6 @@ from validation_pkg.utils.formats import ReadFormat,FeatureFormat,GenomeFormat,C
 class TestConfigManager:
     """Test suite for ConfigManager configuration loading and validation."""
     
-    
     @pytest.fixture
     def temp_dir(self):
         """Create a temporary directory for test files."""
@@ -109,9 +108,6 @@ class TestConfigManager:
         assert config.mod_feature.filepath.is_absolute()
         assert all(read.filepath.is_absolute() for read in config.reads)
         
-        # Check output_dir is set
-        assert config.output_dir is not None
-        assert config.output_dir.is_absolute()
     
     def test_missing_config_file(self, temp_dir):
         """Test error when config file doesn't exist."""
@@ -268,7 +264,7 @@ class TestConfigManager:
         config_file = temp_dir / "config.json"
         config_file.write_text(json.dumps(config))
         
-        with pytest.raises((ValidationFileNotFoundError, FileNotFoundError), match="The directory was not found\n"):
+        with pytest.raises((ValidationFileNotFoundError, FileNotFoundError), match="Directory not found"):
             ConfigManager.load(str(config_file))
     
     def test_neither_filename_nor_directory_in_reads(self, temp_dir):
@@ -551,6 +547,214 @@ class TestConfigManager:
         assert loaded.ref_feature.filepath.is_absolute()
         assert loaded.ref_feature.detected_format == FeatureFormat.GFF
         assert loaded.ref_feature.coding_type == CodingType.GZIP
+
+class TestConfigManagerUtilities:
+    """Test utility methods in ConfigManager."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    def test_detect_compression_type_none(self):
+        """Test detecting no compression."""
+        filepath = Path("genome.fasta")
+        coding_type = ConfigManager._detect_compression_type(filepath)
+        assert coding_type == CodingType.NONE
+
+    def test_detect_compression_type_gzip(self):
+        """Test detecting gzip compression."""
+        filepath = Path("genome.fasta.gz")
+        coding_type = ConfigManager._detect_compression_type(filepath)
+        assert coding_type == CodingType.GZIP
+
+    def test_detect_compression_type_gzip_alt(self):
+        """Test detecting gzip with .gzip extension."""
+        filepath = Path("genome.fasta.gzip")
+        coding_type = ConfigManager._detect_compression_type(filepath)
+        assert coding_type == CodingType.GZIP
+
+    def test_detect_compression_type_bzip2(self):
+        """Test detecting bzip2 compression."""
+        filepath = Path("genome.fasta.bz2")
+        coding_type = ConfigManager._detect_compression_type(filepath)
+        assert coding_type == CodingType.BZIP2
+
+    def test_detect_compression_type_bzip2_alt(self):
+        """Test detecting bzip2 with .bzip2 extension."""
+        filepath = Path("genome.fasta.bzip2")
+        coding_type = ConfigManager._detect_compression_type(filepath)
+        assert coding_type == CodingType.BZIP2
+
+    def test_detect_file_format_fasta(self):
+        """Test detecting FASTA format."""
+        filepath = Path("genome.fasta")
+        file_format = ConfigManager._detect_file_format(filepath, GenomeFormat)
+        assert file_format == GenomeFormat.FASTA
+
+    def test_detect_file_format_fasta_compressed(self):
+        """Test detecting FASTA format from compressed file."""
+        filepath = Path("genome.fasta.gz")
+        file_format = ConfigManager._detect_file_format(filepath, GenomeFormat)
+        assert file_format == GenomeFormat.FASTA
+
+    def test_detect_file_format_genbank(self):
+        """Test detecting GenBank format."""
+        filepath = Path("genome.gbk")
+        file_format = ConfigManager._detect_file_format(filepath, GenomeFormat)
+        assert file_format == GenomeFormat.GENBANK
+
+    def test_detect_file_format_fastq(self):
+        """Test detecting FASTQ format."""
+        filepath = Path("reads.fastq.gz")
+        file_format = ConfigManager._detect_file_format(filepath, ReadFormat)
+        assert file_format == ReadFormat.FASTQ
+
+    def test_detect_file_format_gff(self):
+        """Test detecting GFF format."""
+        filepath = Path("features.gff")
+        file_format = ConfigManager._detect_file_format(filepath, FeatureFormat)
+        assert file_format == FeatureFormat.GFF
+
+    def test_detect_file_format_no_extension(self):
+        """Test error when no extension found."""
+        filepath = Path("genome")
+        with pytest.raises(ValueError, match="no extension found"):
+            ConfigManager._detect_file_format(filepath, GenomeFormat)
+
+    def test_parse_config_file_value_dict(self):
+        """Test parsing config value as dict."""
+        value = {"filename": "genome.fasta", "extra_key": "value"}
+        filename, extra = ConfigManager._parse_config_file_value(value, "ref_genome")
+        assert filename == "genome.fasta"
+        assert extra == {"extra_key": "value"}
+
+    def test_parse_config_file_value_string(self):
+        """Test parsing config value as string."""
+        value = "genome.fasta"
+        filename, extra = ConfigManager._parse_config_file_value(value, "ref_genome")
+        assert filename == "genome.fasta"
+        assert extra == {}
+
+    def test_parse_config_file_value_missing_filename(self):
+        """Test error when dict missing filename field."""
+        value = {"other_key": "value"}
+        with pytest.raises(ValueError, match="must contain 'filename' field"):
+            ConfigManager._parse_config_file_value(value, "ref_genome")
+
+    def test_parse_config_file_value_invalid_type(self):
+        """Test error with invalid value type."""
+        value = 123  # Not a dict or string
+        with pytest.raises(ValueError, match="must be a dict or string"):
+            ConfigManager._parse_config_file_value(value, "ref_genome")
+
+
+class TestConfigManagerOutputDirectory:
+    """Test output directory setup functionality."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    def test_output_directory_created(self, temp_dir):
+        """Test that output directory is created during config load."""
+        # Create minimal config files
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        # Check output_dir was set
+        assert loaded_config.output_dir is not None
+        assert loaded_config.output_dir.exists()
+        assert loaded_config.output_dir.is_dir()
+
+        # Check it's at the expected location (config_dir.parent / "valid")
+        expected_output_dir = config_file.parent.parent / "valid"
+        assert loaded_config.output_dir == expected_output_dir
+
+    def test_output_directory_path_structure(self, temp_dir):
+        """Test output directory is at config_dir.parent / 'valid'."""
+        # Create config in a subdirectory
+        config_subdir = temp_dir / "config"
+        config_subdir.mkdir()
+
+        (config_subdir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (config_subdir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (config_subdir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = config_subdir / "config.json"
+        config_file.write_text(json.dumps(config))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        # Output dir should be at temp_dir / "valid" (parent of config_subdir)
+        expected_output_dir = temp_dir / "valid"
+        assert loaded_config.output_dir == expected_output_dir
+        assert expected_output_dir.exists()
+
+    def test_genome_configs_have_output_dir(self, temp_dir):
+        """Test that genome configs have output_dir set."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        # Check genome configs have output_dir
+        expected_output_dir = temp_dir.parent / "valid"
+        assert loaded_config.ref_genome.output_dir == expected_output_dir
+        assert loaded_config.mod_genome.output_dir == expected_output_dir
+
+    def test_read_configs_have_output_dir(self, temp_dir):
+        """Test that read configs have output_dir set."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        # Check read configs have output_dir
+        expected_output_dir = temp_dir.parent / "valid"
+        assert all(read.output_dir == expected_output_dir for read in loaded_config.reads)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

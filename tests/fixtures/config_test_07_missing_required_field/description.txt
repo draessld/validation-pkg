@@ -1,0 +1,3 @@
+Config Test Case 7: Missing required field
+- Config missing 'reads' field
+- Expected: Should raise ConfigurationError about missing 'reads'

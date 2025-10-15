@@ -1,0 +1,4 @@
+Test Case 4: Compressed FASTA (bzip2)
+- Single sequence compressed with bzip2
+- Tests bzip2 compression handling
+- Expected: Should decompress, parse, and output correctly

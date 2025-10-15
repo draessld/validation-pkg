@@ -49,7 +49,6 @@ Allowed values:
 
 - `"GZIP"` — gzip compression (`.gz`,`.gzip`)
 - `"BZIP"` — bzip2 compression (`.bz2`,`.bzip2`)
-- `"TGZ"` — tar + gzip archive (`.tgz`, `.tar.gz`)
 
 ---
 ## Genome Config

@@ -5,7 +5,7 @@ Handles GFF, GTF, and BED formats with compression support.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, IO
 from dataclasses import dataclass
 import gzip
 import bz2
@@ -72,11 +72,12 @@ class FeatureValidator:
             >>> settings = settings.update(sort_by_position=True, coding_type='gz')
             >>> validator = FeatureValidator(feature_config, output_dir, settings)
         """
+        # TODO: Same prefix as for genomes - for every feature
         # Validation options
         sort_by_position: bool = True
         check_coordinates: bool = True
         allow_zero_length: bool = False
-        allow_negative_coords: bool = True
+        allow_negative_coords: bool = False
 
         # Output format
         coding_type: Optional[str] = None
@@ -84,7 +85,7 @@ class FeatureValidator:
         output_subdir_name: Optional[str] = None
 
 
-    def __init__(self, feature_config, output_dir, settings: Optional[Settings] = None):
+    def __init__(self, feature_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
         """
         Initialize feature validator.
 
@@ -123,7 +124,7 @@ class FeatureValidator:
             'avg_length': 0.0
         }
     
-    def validate(self):
+    def validate(self) -> None:
         """
         Main validation and processing workflow.
 
@@ -158,9 +159,11 @@ class FeatureValidator:
             self.logger.error(f"Feature validation failed: {e}")
             raise
 
-    def _open_file(self, mode='rt'):
+    def _open_file(self, mode: str = 'rt') -> IO:
         """
         Open file with automatic decompression based on feature_config.
+
+        Uses centralized file opening from file_handler.py to eliminate code duplication.
 
         Args:
             mode: File opening mode (default: 'rt' for text read)
@@ -172,26 +175,22 @@ class FeatureValidator:
             CompressionError: If file cannot be opened or decompressed
         """
         try:
-            coding_type_str = str(self.feature_config.coding_type).lower()
-
-            if 'gzip' in coding_type_str or coding_type_str == 'gz':
-                return gzip.open(self.input_path, mode)
-            elif 'bzip2' in coding_type_str or coding_type_str == 'bz2':
-                return bz2.open(self.input_path, mode)
-            else:
-                # No compression or unrecognized
-                return open(self.input_path, mode)
-        except Exception as e:
-            error_msg = f"Failed to open file: {e}"
+            from validation_pkg.utils.file_handler import open_file_with_coding_type
+            return open_file_with_coding_type(
+                self.input_path,
+                self.feature_config.coding_type,
+                mode
+            )
+        except CompressionError as e:
             self.logger.add_validation_issue(
                 level='ERROR',
                 category='feature',
-                message=error_msg,
-                details={'file': str(self.input_path), 'error': str(e)}
+                message=str(e),
+                details={'file': str(self.input_path)}
             )
-            raise CompressionError(error_msg) from e
+            raise
 
-    def _parse_file(self):
+    def _parse_file(self) -> None:
         """Parse feature file based on detected format from feature_config."""
         format_str = str(self.feature_config.detected_format)
         self.logger.debug(f"Parsing {format_str} file...")
@@ -362,7 +361,7 @@ class FeatureValidator:
 
         return features
 
-    def _validate_features(self):
+    def _validate_features(self) -> None:
         """Validate parsed features."""
         self.logger.debug("Validating features...")
 
@@ -411,7 +410,7 @@ class FeatureValidator:
 
         self.logger.debug("✓ Feature validation passed")
 
-    def _apply_edits(self):
+    def _apply_edits(self) -> None:
         """
         Apply editing specifications to features based on settings.
 
@@ -428,7 +427,7 @@ class FeatureValidator:
 
         self.logger.debug(f"✓ Edits applied, {len(self.features)} feature(s) remaining")
 
-    def _collect_statistics(self):
+    def _collect_statistics(self) -> None:
         """Collect statistics about the features."""
         self.logger.debug("Collecting statistics...")
 
@@ -465,7 +464,7 @@ class FeatureValidator:
 
         self.logger.debug(f"Statistics: {self.statistics}")
 
-    def _convert_to_gff(self):
+    def _convert_to_gff(self) -> None:
         """Convert features to GFF format (if needed and requested)."""
         if self.feature_config.detected_format == FeatureFormat.GFF:
             self.logger.debug("Keeping GFF format")
@@ -548,7 +547,7 @@ class FeatureValidator:
 
         return output_path
 
-    def _write_features(self, handle):
+    def _write_features(self, handle: IO) -> None:
         """
         Write features to file handle in appropriate format.
 

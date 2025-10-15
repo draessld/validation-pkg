@@ -82,30 +82,40 @@ class ValidationLogger:
         self,
         console_level: str = "INFO",
         log_file: Optional[Path] = None,
-        report_file: Optional[Path] = None
+        report_file: Optional[Path] = None,
+        clear_previous_issues: bool = True
     ):
         """
         Set up logging handlers.
-        
+
         Args:
             console_level: Level for console output (DEBUG, INFO, WARNING, ERROR)
             log_file: Path to detailed log file (optional)
             report_file: Path to validation report file (optional)
+            clear_previous_issues: Clear validation issues from previous runs (default: True)
+
+        Note:
+            Setting clear_previous_issues=True helps prevent test contamination and
+            ensures each validation run starts with a clean slate.
         """
         # Clear existing handlers
         self.logger.handlers.clear()
-        
+
+        # Clear validation issues from previous runs (prevents contamination)
+        if clear_previous_issues:
+            self.clear_issues()
+
         # Console handler (colored, user-friendly)
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(getattr(logging, console_level.upper()))
         console_handler.setFormatter(ColoredFormatter())
         self.logger.addHandler(console_handler)
-        
+
         # File handler (detailed debug log)
         if log_file:
             log_file = Path(log_file)
             log_file.parent.mkdir(parents=True, exist_ok=True)
-            
+
             file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
             file_handler.setLevel(logging.DEBUG)
             file_formatter = logging.Formatter(
@@ -114,9 +124,9 @@ class ValidationLogger:
             )
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
-            
+
             self.info(f"Detailed log file: {log_file}")
-        
+
         # Store report file path
         self.report_file = report_file
         if report_file:
@@ -150,7 +160,7 @@ class ValidationLogger:
     def add_validation_issue(self, level: str, category: str, message: str, details: dict = None):
         """
         Add a structured validation issue.
-        
+
         Args:
             level: ERROR, WARNING, INFO
             category: genome, feature, read, inter-file, etc.
@@ -165,18 +175,19 @@ class ValidationLogger:
             'details': details or {}
         }
         self.validation_issues.append(issue)
-        
-        # Also log to console
+
+        # Also log to console (but don't add to validation_issues again!)
         log_message = f"[{category}] {message}"
         if details:
             log_message += f" | Details: {details}"
-        
+
+        # Use logger directly to avoid duplicate appending
         if level == 'ERROR':
-            self.error(log_message)
+            self.logger.error(log_message)
         elif level == 'WARNING':
-            self.warning(log_message)
+            self.logger.warning(log_message)
         else:
-            self.info(log_message)
+            self.logger.info(log_message)
     
     def generate_report(self):
         """
@@ -256,8 +267,51 @@ class ValidationLogger:
         }
     
     def clear_issues(self):
-        """Clear all validation issues (useful for testing)."""
+        """
+        Clear all validation issues.
+
+        This is useful for:
+        - Starting a new validation run with clean state
+        - Test isolation (preventing contamination between tests)
+        - Resetting after generating a report
+
+        Example:
+            >>> logger = get_logger()
+            >>> logger.clear_issues()
+            >>> # Now validation_issues list is empty
+        """
         self.validation_issues.clear()
+
+    def __enter__(self):
+        """
+        Context manager entry - clear issues at start.
+
+        This enables using the logger with 'with' statement for automatic isolation:
+
+        Example:
+            >>> with get_logger() as logger:
+            ...     logger.info("Starting validation")
+            ...     # validation_issues starts empty
+            ...     # and will be available throughout this block
+        """
+        self.clear_issues()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Context manager exit - optionally clear issues at end.
+
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value
+            exc_tb: Exception traceback
+
+        Returns:
+            False to propagate exceptions
+        """
+        # Don't clear issues on exit - caller may want to inspect them
+        # If you want to clear, call clear_issues() explicitly
+        return False
 
 
 # Convenience functions for easy import

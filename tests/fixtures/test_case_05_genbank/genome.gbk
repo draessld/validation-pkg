@@ -1,0 +1,22 @@
+LOCUS       TEST_GENOME              90 bp    DNA     linear       01-JAN-2024
+DEFINITION  Test genome for validation.
+ACCESSION   TEST001
+VERSION     TEST001.1
+KEYWORDS    .
+SOURCE      Test organism
+  ORGANISM  Test organism
+            Bacteria.
+FEATURES             Location/Qualifiers
+     source          1..90
+                     /organism="Test organism"
+                     /mol_type="genomic DNA"
+     gene            10..50
+                     /gene="testA"
+     CDS             10..50
+                     /gene="testA"
+                     /product="Test protein A"
+                     /translation="MIDKL"
+ORIGIN
+        1 atcgatcgat cgatcgatcg atcgatcgat cgatcgatcg atcgatcgat cgatcgatcg
+       61 atcgatcgat cgatcgatcg atcgatcgat
+//

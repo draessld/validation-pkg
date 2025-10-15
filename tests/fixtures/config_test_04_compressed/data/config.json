@@ -1,0 +1,10 @@
+{
+  "ref_genome_filename": "ref_genome.fasta.gz",
+  "mod_genome_filename": "mod_genome.fasta.bz2",
+  "reads": [
+    {
+      "filename": "reads.fastq.gz",
+      "ngs_type": "illumina"
+    }
+  ]
+}

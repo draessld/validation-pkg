@@ -1,0 +1,11 @@
+LOCUS       PLASMID_MOD             50 bp    DNA     circular     01-JAN-2024
+DEFINITION  Modified plasmid
+ACCESSION   PLAS002
+VERSION     PLAS002.1
+KEYWORDS    .
+SOURCE      Test organism
+  ORGANISM  Test organism
+            Bacteria.
+ORIGIN
+        1 atcgatcgat cgatcgatcg atcgatcgat cgatcgatcg atcgatcgat
+//
