@@ -23,7 +23,7 @@ from validation_pkg.exceptions import (
     BamFormatError,
     CompressionError
 )
-from validation_pkg.utils.formats import ReadFormat
+from validation_pkg.utils.formats import ReadFormat, CodingType
 
 class ReadValidator:
     """
@@ -118,6 +118,10 @@ class ReadValidator:
 
         Uses read_config data (format, compression) provided by ConfigManager.
 
+        Workflow differs based on input format:
+        - FASTQ: Parse → Validate → Edit → Statistics → Save
+        - BAM: Copy original → Convert to FASTQ → Parse → Validate → Edit → Statistics → Save
+
         Raises:
             ReadValidationError: If validation fails
         """
@@ -128,20 +132,40 @@ class ReadValidator:
             # File existence already checked by ConfigManager
             # Format and compression already detected in read_config
 
-            # Step 1: Parse and validate
-            self._parse_file()
+            # Special workflow for BAM files
+            if self.read_config.detected_format == ReadFormat.BAM:
+                # Step 1: Copy original BAM to output (if keep_bam is enabled)
+                if self.settings.keep_bam:
+                    self._copy_bam_to_output()
 
-            # Step 2: Apply editing specifications
-            self._apply_edits()
+                # Step 2: Convert BAM to FASTQ (populates self.sequences)
+                self._convert_bam_to_fastq()
 
-            # Step 3: Collect statistics
-            self._collect_statistics()
+                # Step 3: Validate sequences
+                self._validate_sequences()
 
-            # Step 4: Convert to FASTQ (if needed)
-            self._convert_to_fastq()
+                # Step 4: Apply editing specifications
+                self._apply_edits()
 
-            # Step 5: Save to output directory
-            output_path = self._save_output()
+                # Step 5: Collect statistics
+                self._collect_statistics()
+
+                # Step 6: Save FASTQ output
+                output_path = self._save_output()
+
+            else:
+                # Standard FASTQ workflow
+                # Step 1: Parse and validate
+                self._parse_file()
+
+                # Step 2: Apply editing specifications
+                self._apply_edits()
+
+                # Step 3: Collect statistics
+                self._collect_statistics()
+
+                # Step 4: Save to output directory (already FASTQ)
+                output_path = self._save_output()
 
             self.logger.info(f"✓ Read validation completed: {output_path.name}")
             self.logger.debug(f"Statistics: {self.statistics}")
@@ -166,16 +190,13 @@ class ReadValidator:
             CompressionError: If file cannot be opened or decompressed
         """
         try:
-            coding_type_str = str(self.read_config.coding_type)
-
-            if coding_type_str == 'gz':
+            # Use enum comparison instead of string comparison
+            if self.read_config.coding_type == CodingType.GZIP:
                 return gzip.open(self.input_path, mode)
-            elif coding_type_str == 'bz2':
+            elif self.read_config.coding_type == CodingType.BZIP2:
                 return bz2.open(self.input_path, mode)
-            elif coding_type_str == '' or coding_type_str == 'CodingType()':
-                # No compression
-                return open(self.input_path, mode)
             else:
+                # No compression or unknown
                 return open(self.input_path, mode)
         except Exception as e:
             error_msg = f"Failed to open file: {e}"
@@ -188,25 +209,23 @@ class ReadValidator:
             raise CompressionError(error_msg) from e
     
     def _parse_file(self):
-        """Parse file using BioPython and validate format from read_config."""
+        """
+        Parse FASTQ file using BioPython and validate format from read_config.
+
+        Note: BAM files are handled separately in the validate() method.
+        This method only processes FASTQ files.
+        """
         self.logger.debug(f"Parsing {self.read_config.detected_format} file...")
 
-        # BAM files: just copy to output location without processing
-        if self.read_config.detected_format == ReadFormat.BAM:
-            self.logger.add_validation_issue(
-                    level='WARNING',
-                    category='read',
-                    message="BAM file processing not fully implemented - copying file to output directory",
-                    details={'file': self.read_config.filename, 'format': self.read_config.detected_format}
-                )
-            self._copy_bam_to_output()
-            raise ReadValidationError("BAM file processing not fully implemented - file copied to output directory")
-            
         try:
-            with self._open_file() as handle:
-                # Parse using BioPython - convert ReadFormat to BioPython format string
+            # Open file with automatic decompression
+            handle = self._open_file()
+            try:
+                # Parse using BioPython
                 biopython_format = str(self.read_config.detected_format).lower().replace('readformat.', '')
                 self.sequences = list(SeqIO.parse(handle, biopython_format))
+            finally:
+                handle.close()
 
             # Validate we got sequences
             if not self.sequences:
@@ -306,36 +325,16 @@ class ReadValidator:
         """
         Apply editing specifications to sequences based on settings.
 
-        Applies the following edits (if enabled in settings):
-        - Keep original BAM file if requested (keep_bam)
-        - Future: Remove short sequences, add prefixes, etc.
+        Future edits may include:
+        - Remove short sequences (min_read_length)
+        - Quality filtering
+        - Adapter trimming
+        - Read ID prefix/suffix modification
         """
         self.logger.debug("Applying editing specifications from settings...")
 
-        # If keep_bam is True and we're processing a BAM file, save a copy
-        if self.settings.keep_bam and self.read_config.detected_format == ReadFormat.BAM:
-            self.logger.debug("Keeping copy of original BAM file...")
-            try:
-                # Determine output directory (with optional subdirectory)
-                output_dir = self.output_dir
-                if self.settings.output_subdir_name:
-                    output_dir = output_dir / self.settings.output_subdir_name
-
-                # Create output directory
-                output_dir.mkdir(parents=True, exist_ok=True)
-
-                # Save copy with .bam extension preserved
-                bam_output_path = output_dir / self.read_config.filename
-                shutil.copy2(self.input_path, bam_output_path)
-
-                self.logger.info(f"Original BAM file preserved: {bam_output_path}")
-            except Exception as e:
-                self.logger.add_validation_issue(
-                    level='WARNING',
-                    category='read',
-                    message=f"Failed to preserve original BAM file: {e}",
-                    details={'file': self.read_config.filename, 'error': str(e)}
-                )
+        # Currently no edits are implemented
+        # This is a placeholder for future functionality
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
     
@@ -404,34 +403,6 @@ class ReadValidator:
 
         self.logger.debug(f"Statistics: {self.statistics}")
     
-    def _convert_to_fastq(self):
-        """
-        Convert sequences to FASTQ format (if not already).
-
-        For BAM files, tries to use pysam library if available,
-        otherwise falls back to samtools command-line tool.
-
-        Raises:
-            ReadValidationError: If conversion fails or required tools are not available
-        """
-        if self.read_config.detected_format == ReadFormat.FASTQ:
-            self.logger.debug("Already in FASTQ format")
-            return
-
-        self.logger.debug(f"Converting from {self.read_config.detected_format} to FASTQ...")
-
-        if self.read_config.detected_format == ReadFormat.BAM:
-            self._convert_bam_to_fastq()
-        else:
-            self.logger.add_validation_issue(
-                level='WARNING',
-                category='read',
-                message=f"Conversion from {self.read_config.detected_format} to FASTQ not implemented",
-                details={'format': self.read_config.detected_format}
-            )
-
-        self.logger.debug("✓ Ready for FASTQ output")
-
     def _convert_bam_to_fastq(self):
         """
         Convert BAM file to FASTQ format using pysam or samtools.
@@ -612,13 +583,13 @@ class ReadValidator:
 
         if self.settings.coding_type == 'gz':
             with gzip.open(output_path, 'wt') as handle:
-                SeqIO.write(self.sequences, handle, 'fasta')
+                SeqIO.write(self.sequences, handle, 'fastq')
         elif self.settings.coding_type == 'bz2':
             with bz2.open(output_path, 'wt') as handle:
-                SeqIO.write(self.sequences, handle, 'fasta')
+                SeqIO.write(self.sequences, handle, 'fastq')
         else:
             with open(output_path, 'w') as handle:
-                SeqIO.write(self.sequences, handle, 'fasta')
+                SeqIO.write(self.sequences, handle, 'fastq')
 
         self.logger.info(f"Output saved: {output_path}")
 

@@ -11,11 +11,6 @@ from copy import deepcopy
 from typing import Dict, Any
 from abc import ABC
 
-
-# ===== GLOBAL CONSTANTS =====
-output_dir_name = "output"
-
-
 # ===== Base Settings Class =====
 class BaseSettings(ABC):
     """

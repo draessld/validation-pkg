@@ -462,7 +462,8 @@ class TestGenomeValidatorEditing:
         """Test adding prefix to sequence IDs."""
         settings = GenomeValidator.Settings(
             sequence_prefix="chr",
-            min_sequence_length=0
+            min_sequence_length=0,
+            plasmid_split=False  # Disable to test all 3 sequences
         )
 
         genome_config = GenomeConfig(
@@ -700,6 +701,221 @@ class TestGenomeValidatorOutput:
             records = list(SeqIO.parse(f, 'fasta'))
             assert len(records) == 1
             assert records[0].id == "TEST001"
+
+
+class TestGenomeValidatorPlasmidSplit:
+    """Test plasmid splitting functionality."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def output_dir(self, temp_dir):
+        """Create output directory."""
+        out_dir = temp_dir / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    @pytest.fixture
+    def fasta_with_plasmids(self, temp_dir):
+        """Create FASTA file with chromosome and multiple plasmids."""
+        fasta_file = temp_dir / "genome_plasmids.fasta"
+        sequences = [
+            SeqRecord(Seq("A" * 5000), id="chromosome", description=""),  # Longest
+            SeqRecord(Seq("T" * 500), id="plasmid1", description=""),     # Shorter
+            SeqRecord(Seq("G" * 1000), id="plasmid2", description="")     # Medium
+        ]
+        with open(fasta_file, "w") as f:
+            SeqIO.write(sequences, f, 'fasta')
+        return fasta_file
+
+    @pytest.fixture
+    def fasta_with_two_sequences(self, temp_dir):
+        """Create FASTA file with exactly 2 sequences."""
+        fasta_file = temp_dir / "genome_two_seqs.fasta"
+        sequences = [
+            SeqRecord(Seq("A" * 5000), id="chromosome", description=""),
+            SeqRecord(Seq("T" * 1000), id="plasmid1", description="")
+        ]
+        with open(fasta_file, "w") as f:
+            SeqIO.write(sequences, f, 'fasta')
+        return fasta_file
+
+    def test_plasmid_split_with_multiple_sequences(self, fasta_with_plasmids, output_dir):
+        """Test that plasmids are split when more than 2 sequences present."""
+        genome_config = GenomeConfig(
+            filename="genome_plasmids.fasta",
+            filepath=fasta_with_plasmids,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        settings = GenomeValidator.Settings(
+            plasmid_split=True,
+            min_sequence_length=0  # Don't filter by length
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Main output should have only 1 sequence (longest)
+        assert len(validator.sequences) == 1
+        assert validator.sequences[0].id == "chromosome"
+        assert len(validator.sequences[0].seq) == 5000
+
+        # Check main output file
+        main_file = output_dir / "genome_plasmids.fasta"
+        assert main_file.exists()
+        main_seqs = list(SeqIO.parse(main_file, 'fasta'))
+        assert len(main_seqs) == 1
+        assert main_seqs[0].id == "chromosome"
+
+        # Check plasmid output file
+        plasmid_file = output_dir / "genome_plasmids_plasmid.fasta"
+        assert plasmid_file.exists()
+        plasmid_seqs = list(SeqIO.parse(plasmid_file, 'fasta'))
+        assert len(plasmid_seqs) == 2
+
+        # Plasmids should be ordered by length (longest first in list)
+        assert plasmid_seqs[0].id == "plasmid2"
+        assert len(plasmid_seqs[0].seq) == 1000
+        assert plasmid_seqs[1].id == "plasmid1"
+        assert len(plasmid_seqs[1].seq) == 500
+
+    def test_plasmid_split_disabled(self, fasta_with_plasmids, output_dir):
+        """Test that plasmid split can be disabled."""
+        genome_config = GenomeConfig(
+            filename="genome_plasmids.fasta",
+            filepath=fasta_with_plasmids,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        settings = GenomeValidator.Settings(
+            plasmid_split=False,  # Disabled
+            min_sequence_length=0
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Should keep all 3 sequences
+        assert len(validator.sequences) == 3
+
+        # Should not create plasmid file
+        plasmid_file = output_dir / "genome_plasmids_plasmid.fasta"
+        assert not plasmid_file.exists()
+
+    def test_plasmid_split_not_triggered_with_two_sequences(self, fasta_with_two_sequences, output_dir):
+        """Test that plasmid split is not triggered when only 2 sequences."""
+        genome_config = GenomeConfig(
+            filename="genome_two_seqs.fasta",
+            filepath=fasta_with_two_sequences,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        settings = GenomeValidator.Settings(
+            plasmid_split=True,
+            min_sequence_length=0
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Should keep both sequences (not split when <= 2 sequences)
+        assert len(validator.sequences) == 2
+
+        # Should not create plasmid file
+        plasmid_file = output_dir / "genome_two_seqs_plasmid.fasta"
+        assert not plasmid_file.exists()
+
+    def test_plasmid_split_with_suffix(self, fasta_with_plasmids, output_dir):
+        """Test plasmid split with custom output suffix."""
+        genome_config = GenomeConfig(
+            filename="genome_plasmids.fasta",
+            filepath=fasta_with_plasmids,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        settings = GenomeValidator.Settings(
+            plasmid_split=True,
+            output_filename_suffix="validated",
+            min_sequence_length=0
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Check filenames include suffix
+        main_file = output_dir / "genome_plasmids_validated.fasta"
+        assert main_file.exists()
+
+        plasmid_file = output_dir / "genome_plasmids_validated_plasmid.fasta"
+        assert plasmid_file.exists()
+
+    def test_plasmid_split_with_compression(self, fasta_with_plasmids, output_dir):
+        """Test plasmid split with compressed output."""
+        genome_config = GenomeConfig(
+            filename="genome_plasmids.fasta",
+            filepath=fasta_with_plasmids,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        settings = GenomeValidator.Settings(
+            plasmid_split=True,
+            coding_type='gz',
+            min_sequence_length=0
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Check both files are compressed
+        main_file = output_dir / "genome_plasmids.fasta.gz"
+        assert main_file.exists()
+
+        plasmid_file = output_dir / "genome_plasmids_plasmid.fasta.gz"
+        assert plasmid_file.exists()
+
+        # Verify contents are readable
+        with gzip.open(main_file, 'rt') as f:
+            main_seqs = list(SeqIO.parse(f, 'fasta'))
+            assert len(main_seqs) == 1
+
+        with gzip.open(plasmid_file, 'rt') as f:
+            plasmid_seqs = list(SeqIO.parse(f, 'fasta'))
+            assert len(plasmid_seqs) == 2
+
+    def test_plasmid_split_with_subdirectory(self, fasta_with_plasmids, output_dir):
+        """Test plasmid split outputs to subdirectory."""
+        genome_config = GenomeConfig(
+            filename="genome_plasmids.fasta",
+            filepath=fasta_with_plasmids,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        settings = GenomeValidator.Settings(
+            plasmid_split=True,
+            output_subdir_name="genomes",
+            min_sequence_length=0
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Check both files are in subdirectory
+        main_file = output_dir / "genomes" / "genome_plasmids.fasta"
+        assert main_file.exists()
+
+        plasmid_file = output_dir / "genomes" / "genome_plasmids_plasmid.fasta"
+        assert plasmid_file.exists()
 
 
 if __name__ == "__main__":

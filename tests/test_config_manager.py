@@ -508,13 +508,13 @@ class TestConfigManager:
         # Minimal input genomes (required)
         (temp_dir / "ref.fasta").write_text(">s\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">s\nATCG\n")
-        (temp_dir / "reads.fastq.tar.gz").write_text("@r1\nATCG\n+\nIIII\n")
+        (temp_dir / "reads.fastq.gz").write_text("@r1\nATCG\n+\nIIII\n")
 
         config = {
             "ref_genome_filename": {"filename": "ref.fasta"},
             "mod_genome_filename": {"filename": "mod.fasta"},
             "reads": [
-                {"filename": "reads.fastq.tar.gz", "ngs_type": "illumina"}
+                {"filename": "reads.fastq.gz", "ngs_type": "illumina"}
             ],
         }
         cfg_file = temp_dir / "config.json"
@@ -524,7 +524,7 @@ class TestConfigManager:
         assert len(loaded.reads) == 1
         assert loaded.reads[0].filepath.is_absolute()
         assert loaded.reads[0].ngs_type == "illumina"
-        assert loaded.reads[0].coding_type == CodingType.TGZ
+        assert loaded.reads[0].coding_type == CodingType.GZIP
 
 
     def test_feature_gz_coding(self,temp_dir):

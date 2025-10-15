@@ -173,16 +173,14 @@ class GenomeValidator:
             CompressionError: If file cannot be opened or decompressed
         """
         try:
-            coding_type_str = str(self.genome_config.coding_type)
+            coding_type_str = str(self.genome_config.coding_type).lower()
 
-            if coding_type_str == 'gz':
+            if 'gzip' in coding_type_str or coding_type_str == 'gz':
                 return gzip.open(self.input_path, mode)
-            elif coding_type_str == 'bz2':
+            elif 'bzip2' in coding_type_str or coding_type_str == 'bz2':
                 return bz2.open(self.input_path, mode)
-            elif coding_type_str == '' or coding_type_str == 'CodingType()':
-                # No compression
-                return open(self.input_path, mode)
             else:
+                # No compression or unrecognized
                 return open(self.input_path, mode)
         except Exception as e:
             error_msg = f"Failed to open file: {e}"
@@ -345,13 +343,96 @@ class GenomeValidator:
                 record.name = record.id
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
-        # 4. Split plasmid sequence
-        if self.settings.plasmid_split:
-            #   TODO: only if number of sequences is greater than 2: keep the longest one in this file, the rest save into new FASTA file with same name and same settings, but with suffix `plasmid`
-            pass
+        # 3. Split plasmid sequences
+        if self.settings.plasmid_split and len(self.sequences) > 2:
+            self._split_plasmids()
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
-    
+
+    def _split_plasmids(self):
+        """
+        Split plasmid sequences into a separate file.
+
+        When more than 2 sequences are present:
+        - Keep the longest sequence (assumed to be the chromosome) in main output
+        - Save remaining sequences (plasmids) to a separate file with "_plasmid" suffix
+        - Uses same output settings (compression, subdirectory) as main file
+        """
+        self.logger.debug(f"Splitting plasmids from {len(self.sequences)} sequences...")
+
+        # Sort sequences by length (longest first)
+        sorted_sequences = sorted(self.sequences, key=lambda x: len(x.seq), reverse=True)
+
+        # Keep longest as main chromosome
+        main_sequence = [sorted_sequences[0]]
+        plasmid_sequences = sorted_sequences[1:]
+
+        self.logger.info(
+            f"Splitting genome: keeping longest sequence ({sorted_sequences[0].id}, "
+            f"{len(sorted_sequences[0].seq)} bp) as main, "
+            f"saving {len(plasmid_sequences)} sequence(s) as plasmids"
+        )
+
+        # Save plasmid sequences to separate file
+        self._save_plasmid_file(plasmid_sequences)
+
+        # Update main sequences to only include chromosome
+        self.sequences = main_sequence
+
+    def _save_plasmid_file(self, plasmid_sequences: List[SeqRecord]):
+        """
+        Save plasmid sequences to a separate file.
+
+        Args:
+            plasmid_sequences: List of SeqRecord objects for plasmids
+        """
+        # Determine output directory (with optional subdirectory)
+        output_dir = self.output_dir
+        if self.settings.output_subdir_name:
+            output_dir = output_dir / self.settings.output_subdir_name
+
+        # Create output directory
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate plasmid filename
+        base_name = self.genome_config.filename
+        # Remove all suffixes
+        for suffix in self.input_path.suffixes:
+            base_name = base_name.replace(suffix, '')
+
+        # Add plasmid suffix and optional user suffix
+        if self.settings.output_filename_suffix:
+            plasmid_filename = f"{base_name}_{self.settings.output_filename_suffix}_plasmid.fasta"
+        else:
+            plasmid_filename = f"{base_name}_plasmid.fasta"
+
+        # Add compression extension if requested
+        if self.settings.coding_type == 'gz':
+            plasmid_filename += '.gz'
+        elif self.settings.coding_type == 'bz2':
+            plasmid_filename += '.bz2'
+
+        plasmid_path = output_dir / plasmid_filename
+
+        # Write plasmid sequences with appropriate compression
+        self.logger.debug(f"Writing plasmid sequences to: {plasmid_path}")
+
+        if self.settings.coding_type == 'gz':
+            with gzip.open(plasmid_path, 'wt') as handle:
+                SeqIO.write(plasmid_sequences, handle, 'fasta')
+        elif self.settings.coding_type == 'bz2':
+            with bz2.open(plasmid_path, 'wt') as handle:
+                SeqIO.write(plasmid_sequences, handle, 'fasta')
+        else:
+            with open(plasmid_path, 'w') as handle:
+                SeqIO.write(plasmid_sequences, handle, 'fasta')
+
+        self.logger.info(f"Plasmid sequences saved: {plasmid_path}")
+
+        # Log details about each plasmid
+        for seq in plasmid_sequences:
+            self.logger.debug(f"  Plasmid: {seq.id} ({len(seq.seq)} bp)")
+
     def _collect_statistics(self):
         """Collect statistics about the sequences and validate against thresholds."""
         self.logger.debug("Collecting statistics...")

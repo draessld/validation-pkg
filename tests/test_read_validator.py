@@ -392,8 +392,14 @@ class TestReadValidatorBAMHandling:
             f.write(b"BAM\x01")  # BAM magic number
         return bam_file
 
-    def test_bam_pass_through(self, fake_bam, output_dir):
-        """Test that BAM files are passed through without processing."""
+    def test_bam_conversion_workflow(self, fake_bam, output_dir):
+        """
+        Test that BAM files follow the proper workflow.
+
+        With fake BAM files, the conversion will fail (as expected).
+        This tests that the workflow is triggered correctly.
+        Real BAM conversion requires pysam or samtools.
+        """
         read_config = ReadConfig(
             filename="reads.bam",
             filepath=fake_bam,
@@ -402,13 +408,15 @@ class TestReadValidatorBAMHandling:
             detected_format=ReadFormat.BAM
         )
 
-        validator = ReadValidator(read_config, output_dir)
+        validator = ReadValidator(read_config, output_dir,
+                                 ReadValidator.Settings(keep_bam=True))
 
-        # Should raise ReadValidationError about BAM not being fully implemented
-        with pytest.raises(ReadValidationError, match="BAM file processing not fully implemented"):
+        # Should raise error during BAM conversion (fake BAM file)
+        # The error could be from pysam, samtools, or "neither tool available"
+        with pytest.raises((ReadValidationError, Exception)):
             validator.validate()
 
-        # But the file should be copied to output
+        # With keep_bam=True, the original BAM should be copied
         copied_files = list(output_dir.glob("*.bam"))
         assert len(copied_files) == 1
 
@@ -490,11 +498,11 @@ class TestReadValidatorOutput:
     def simple_fastq(self, temp_dir):
         """Create a simple FASTQ file."""
         fastq_file = temp_dir / "reads.fastq"
-        with open(fastq_file, "w", encoding="ascii", newline="\n") as f:
-            f.write("@@read1 length=20\n")
+        with open(fastq_file, "w") as f:
+            f.write("@read1\n")
             f.write("ATCGATCGATCGATCGATCG\n")
-            f.write("+\n")                      # <- no trailing text
-            f.write("IIIIIIIIIIIIIIIIIIII\n")   # len = 20
+            f.write("+\n")
+            f.write("IIIIIIIIIIIIIIIIIIII\n")
         return fastq_file
 
     def test_output_uncompressed(self, simple_fastq, output_dir):

@@ -15,7 +15,12 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
 # Import logging and exceptions
-from validation_pkg.utils.formats import CodingType,GenomeFormat,ReadFormat,FeatureFormat
+from validation_pkg.utils.formats import CodingType, GenomeFormat, ReadFormat, FeatureFormat
+from validation_pkg.utils.file_handler import (
+    detect_compression_type,
+    detect_file_format,
+    parse_config_file_value
+)
 from validation_pkg.logger import get_logger
 from validation_pkg.exceptions import (
     ConfigurationError,
@@ -244,49 +249,47 @@ class ConfigManager:
     
     @staticmethod
     def _parse_genome_config(value: Any, field_name: str, config_dir: Path) -> GenomeConfig:
-        """Parse a single genome config entry and resolve paths."""
+        """
+        Parse a single genome config entry and resolve paths.
+
+        Uses unified utilities from file_handler for consistent parsing.
+
+        Args:
+            value: Config value (dict with 'filename' or string)
+            field_name: Name of field for error messages
+            config_dir: Base directory for resolving relative paths
+
+        Returns:
+            GenomeConfig with resolved paths and detected format/compression
+
+        Raises:
+            ValueError: If value format is invalid
+        """
         logger = get_logger()
 
-        extra = {}
-        if isinstance(value, dict):
-            if 'filename' not in value:
-                raise ValueError(f"{field_name} must contain 'filename' field")
-            filename = value['filename']
+        # Parse filename and extra fields using unified utility
+        filename, extra = parse_config_file_value(value, field_name)
 
-            # Store any extra keys
-            extra = {k: v for k, v in value.items() if k not in ['filename']}
+        # Warn about extra fields
+        if extra:
+            logger.warning(
+                f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
+            )
 
-            # Warn about extra fields that won't be used
-            if extra:
-                logger.warning(
-                    f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
-                )
-        elif isinstance(value, str):
-            # Accept plain string for backwards compatibility
-            filename = value
-        else:
-            raise ValueError(f"{field_name} must be a dict or string")
-
-        # Resolve absolute path and filename
+        # Resolve absolute path
         filepath = config_dir / filename
-        filename = filepath.name
-        exts = filepath.suffixes
 
-        # Determine coding type (compression) from extensions
-        # If file has multiple extensions like .fasta.gz, the last one is compression
-        coding_str = exts[-1][1:] if len(exts) > 1 else ''  # Remove leading dot
-        coding_type = CodingType(coding_str) if coding_str else CodingType('')
-
-        # Determine format from first extension (e.g., .fasta, .fa, .gb)
-        format_str = exts[0] if exts else ''
-        detected_format = GenomeFormat(format_str)
+        # Detect compression and format using unified utilities
+        coding_type = detect_compression_type(filepath)
+        detected_format = detect_file_format(filepath, GenomeFormat)
 
         return GenomeConfig(
-            filename=filename,
+            filename=filepath.name,
             filepath=filepath,
             coding_type=coding_type,
             detected_format=detected_format,
-            extra=extra)
+            extra=extra
+        )
     
     @staticmethod
     def _parse_read_configs(data: dict, config: Config):
@@ -323,21 +326,15 @@ class ConfigManager:
                     )
                 #   NOTE: I made changes here to iter directory files
                 if filename:
-                    # Resolve absolute path and filename
+                    # Resolve absolute path
                     filepath = config.config_dir / filename
-                    filename = filepath.name
-                    exts = filepath.suffixes
 
-                    # Determine coding type (compression) from extensions
-                    coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
-                    coding_type = CodingType(coding_str) if coding_str else CodingType('')
-
-                    # Determine format from first extension (e.g., .fastq, .fq)
-                    format_str = exts[0] if exts else ''
-                    detected_format = ReadFormat(format_str)
+                    # Detect compression and format using unified utilities
+                    coding_type = detect_compression_type(filepath)
+                    detected_format = detect_file_format(filepath, ReadFormat)
 
                     read_config = ReadConfig(
-                        filename=filename,
+                        filename=filepath.name,
                         filepath=filepath,
                         ngs_type=ngs_type,
                         coding_type=coding_type,
@@ -347,8 +344,7 @@ class ConfigManager:
                     config.reads.append(read_config)
                 
                 if directory:
-                    from os import listdir
-                    #   resolve absolute path directory
+                    #   Resolve absolute path directory
                     dirpath = config.config_dir / directory
                     if not dirpath.exists():
                         raise ValidationFileNotFoundError(
@@ -356,21 +352,14 @@ class ConfigManager:
                         )
                     files = dirpath.iterdir()
                     for file in files:
-                        filename = file.name
                         filepath = file
-                        exts = filepath.suffixes
-                        
-                        #   TODO: it determines "tar.gz" as GZIP, not as TGZ coding 
-                        # Determine coding type (compression) from extensions
-                        coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
-                        coding_type = CodingType(coding_str) if coding_str else CodingType('')
 
-                        # Determine format from first extension (e.g., .fastq, .fq)
-                        format_str = exts[0] if exts else ''
-                        detected_format = ReadFormat(format_str)
-                    
+                        # Detect compression and format using unified utilities
+                        coding_type = detect_compression_type(filepath)
+                        detected_format = detect_file_format(filepath, ReadFormat)
+
                         read_config = ReadConfig(
-                            filename=filename,
+                            filename=filepath.name,
                             filepath=filepath,
                             ngs_type=ngs_type,
                             coding_type=coding_type,
@@ -397,47 +386,42 @@ class ConfigManager:
     
     @staticmethod
     def _parse_feature_config(value: Any, field_name: str, config_dir: Path) -> FeatureConfig:
-        """Parse a single feature config entry and resolve paths."""
+        """
+        Parse a single feature config entry and resolve paths.
+
+        Uses unified utilities from file_handler for consistent parsing.
+
+        Args:
+            value: Config value (dict with 'filename' or string)
+            field_name: Name of field for error messages
+            config_dir: Base directory for resolving relative paths
+
+        Returns:
+            FeatureConfig with resolved paths and detected format/compression
+
+        Raises:
+            ValueError: If value format is invalid
+        """
         logger = get_logger()
 
-        filename = None
-        extra = {}
+        # Parse filename and extra fields using unified utility
+        filename, extra = parse_config_file_value(value, field_name)
 
-        if isinstance(value, dict):
-            if 'filename' not in value:
-                raise ValueError(f"{field_name} must contain 'filename' field")
-            filename = value['filename']
-
-            # Store any extra keys
-            extra = {k: v for k, v in value.items()
-                    if k not in ['filename']}
-
-            # Warn about extra fields
-            if extra:
-                logger.warning(
-                    f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
-                )
-
-        elif isinstance(value, str):
-            filename = value
-        else:
-            raise ValueError(f"{field_name} must be a dict or string")
+        # Warn about extra fields
+        if extra:
+            logger.warning(
+                f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
+            )
 
         # Resolve absolute path
         filepath = config_dir / filename
-        filename = filepath.name
-        exts = filepath.suffixes
 
-        # Determine coding type (compression) from extensions
-        coding_str = '.'.join(exts[1:]) if len(exts) > 1 else ''
-        coding_type = CodingType(coding_str) if coding_str else CodingType('')
-
-        # Determine format from first extension (e.g., .gtf, .gff, .bed)
-        format_str = exts[0] if exts else ''
-        detected_format = FeatureFormat(format_str)
+        # Detect compression and format using unified utilities
+        coding_type = detect_compression_type(filepath)
+        detected_format = detect_file_format(filepath, FeatureFormat)
 
         return FeatureConfig(
-            filename=filename,
+            filename=filepath.name,
             filepath=filepath,
             coding_type=coding_type,
             detected_format=detected_format,
