@@ -16,6 +16,7 @@ import shutil
 
 from validation_pkg.logger import get_logger
 from validation_pkg.utils.settings import BaseSettings
+from validation_pkg.utils.formats import CodingType as CT
 from validation_pkg.exceptions import (
     GenomeValidationError,
     FileFormatError,
@@ -372,20 +373,23 @@ class GenomeValidator:
             plasmid_filename = f"{base_name}_plasmid{index}.fasta"
 
         # Add compression extension if requested
-        if self.settings.coding_type == 'gz':
-            plasmid_filename += '.gz'
-        elif self.settings.coding_type == 'bz2':
-            plasmid_filename += '.bz2'
+        coding = self.settings.coding_type
 
+        if coding in ('gz', 'gzip', CT.GZIP):
+            plasmid_filename += '.gz'
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
+            plasmid_filename += '.bz2'
+            
         plasmid_path = output_dir / plasmid_filename
 
         # Write plasmid sequences with appropriate compression
         self.logger.debug(f"Writing plasmid sequences to: {plasmid_path}")
 
-        if self.settings.coding_type == 'gz':
+
+        if coding in ('gz', 'gzip', CT.GZIP):
             with gzip.open(plasmid_path, 'wt') as handle:
                 SeqIO.write(plasmid_sequences, handle, 'fasta')
-        elif self.settings.coding_type == 'bz2':
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
             with bz2.open(plasmid_path, 'wt') as handle:
                 SeqIO.write(plasmid_sequences, handle, 'fasta')
         else:
@@ -478,9 +482,12 @@ class GenomeValidator:
             output_filename = f"{base_name}.fasta"
 
         # Add compression extension if requested (from settings, not input)
-        if self.settings.coding_type == 'gz':
+        # Support both string ('gz', 'bz2') and enum (CodingType.GZIP, CodingType.BZIP2)
+        coding = self.settings.coding_type
+
+        if coding in ('gz', 'gzip', CT.GZIP):
             output_filename += '.gz'
-        elif self.settings.coding_type == 'bz2':
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
             output_filename += '.bz2'
 
         output_path = output_dir / output_filename
@@ -488,10 +495,10 @@ class GenomeValidator:
         # Write output with appropriate compression
         self.logger.debug(f"Writing output to: {output_path}")
 
-        if self.settings.coding_type == 'gz':
+        if coding in ('gz', 'gzip', CT.GZIP):
             with gzip.open(output_path, 'wt') as handle:
                 SeqIO.write(self.sequences, handle, 'fasta')
-        elif self.settings.coding_type == 'bz2':
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
             with bz2.open(output_path, 'wt') as handle:
                 SeqIO.write(self.sequences, handle, 'fasta')
         else:
