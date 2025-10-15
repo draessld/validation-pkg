@@ -27,3 +27,4 @@ logs
 .mcp.json
 .claude/
 CLAUDE_*.md
+.claudeignore
