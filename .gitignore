@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-
 # Distribution / packaging
 dist/
 build/
@@ -20,4 +19,11 @@ venv/
 .coverage
 
 #   Other
-todo.md
+tmp
+logs
+**/output/**
+
+#   Claude AI
+.mcp.json
+.claude/
+CLAUDE_*.md
