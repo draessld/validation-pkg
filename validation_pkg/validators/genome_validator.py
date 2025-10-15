@@ -385,7 +385,6 @@ class GenomeValidator:
         # Write plasmid sequences with appropriate compression
         self.logger.debug(f"Writing plasmid sequences to: {plasmid_path}")
 
-
         if coding in ('gz', 'gzip', CT.GZIP):
             with gzip.open(plasmid_path, 'wt') as handle:
                 SeqIO.write(plasmid_sequences, handle, 'fasta')
