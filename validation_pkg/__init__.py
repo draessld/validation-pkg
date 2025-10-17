@@ -121,6 +121,159 @@ from validation_pkg.validators.read_validator import ReadValidator
 from validation_pkg.validators.feature_validator import FeatureValidator
 from validation_pkg.logger import setup_logging, get_logger
 
+# Functional API imports
+from pathlib import Path
+from typing import Optional, List, Union
+
+
+# ============================================================================
+# Functional API - Simplified wrapper functions
+# ============================================================================
+
+def validate_genome(
+    genome_config,
+    output_dir: Union[str, Path],
+    settings: Optional[GenomeValidator.Settings] = None
+) -> dict:
+    """
+    Validate a genome file with optional custom settings.
+
+    This is a simplified wrapper around GenomeValidator for easier usage.
+
+    Args:
+        genome_config: GenomeConfig object (from ConfigManager)
+        output_dir: Directory for output files
+        settings: Optional GenomeValidator.Settings object (uses defaults if None)
+
+    Returns:
+        Dictionary with validation statistics
+
+    Example:
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = GenomeValidator.Settings()
+        >>> settings = settings.update(coding_type='gz', plasmid_split=True)
+        >>> stats = validate_genome(config.ref_genome, config.output_dir, settings)
+        >>> print(f"Validated {stats['total_sequences']} sequences")
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    validator = GenomeValidator(genome_config, output_path, settings)
+    validator.validate()
+
+    return validator.get_statistics()
+
+
+def validate_read(
+    read_config,
+    output_dir: Union[str, Path],
+    settings: Optional[ReadValidator.Settings] = None
+) -> dict:
+    """
+    Validate a single read file with optional custom settings.
+
+    This is a simplified wrapper around ReadValidator for easier usage.
+
+    Args:
+        read_config: ReadConfig object (from ConfigManager)
+        output_dir: Directory for output files
+        settings: Optional ReadValidator.Settings object (uses defaults if None)
+
+    Returns:
+        Dictionary with validation statistics
+
+    Example:
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = ReadValidator.Settings()
+        >>> settings = settings.update(coding_type='gz')
+        >>> stats = validate_read(config.reads[0], config.output_dir, settings)
+        >>> print(f"Validated {stats['total_reads']} reads")
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    validator = ReadValidator(read_config, output_path, settings)
+    validator.validate()
+
+    return validator.get_statistics()
+
+
+def validate_reads(
+    read_configs: List,
+    output_dir: Union[str, Path],
+    settings: Optional[ReadValidator.Settings] = None
+) -> List[dict]:
+    """
+    Validate multiple read files with optional custom settings.
+
+    This is a simplified wrapper for validating all reads in a config.
+
+    Args:
+        read_configs: List of ReadConfig objects (from ConfigManager)
+        output_dir: Directory for output files
+        settings: Optional ReadValidator.Settings object (uses defaults if None)
+
+    Returns:
+        List of dictionaries with validation statistics for each file
+
+    Example:
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = ReadValidator.Settings()
+        >>> settings = settings.update(coding_type='gz')
+        >>> stats_list = validate_reads(config.reads, config.output_dir, settings)
+        >>> for idx, stats in enumerate(stats_list, 1):
+        ...     print(f"Read file {idx}: {stats['total_reads']} reads")
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for read_config in read_configs:
+        validator = ReadValidator(read_config, output_path, settings)
+        validator.validate()
+        results.append(validator.get_statistics())
+
+    return results
+
+
+def validate_feature(
+    feature_config,
+    output_dir: Union[str, Path],
+    settings: Optional[FeatureValidator.Settings] = None
+) -> dict:
+    """
+    Validate a feature annotation file with optional custom settings.
+
+    This is a simplified wrapper around FeatureValidator for easier usage.
+
+    Args:
+        feature_config: FeatureConfig object (from ConfigManager)
+        output_dir: Directory for output files
+        settings: Optional FeatureValidator.Settings object (uses defaults if None)
+
+    Returns:
+        Dictionary with validation statistics
+
+    Example:
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = FeatureValidator.Settings()
+        >>> settings = settings.update(coding_type='gz', sort_by_position=True)
+        >>> stats = validate_feature(config.ref_feature, config.output_dir, settings)
+        >>> print(f"Validated {stats['total_features']} features")
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    validator = FeatureValidator(feature_config, output_path, settings)
+    validator.validate()
+
+    return validator.get_statistics()
+
+
+# Alias for backward compatibility and convenience
+validate_features = validate_feature
+
+
 __all__ = [
     # Main classes
     'ValidationCoordinator',
@@ -133,6 +286,13 @@ __all__ = [
     'GenomeValidator',
     'ReadValidator',
     'FeatureValidator',
+
+    # Functional API
+    'validate_genome',
+    'validate_read',
+    'validate_reads',
+    'validate_feature',
+    'validate_features',
 
     # Logging
     'setup_logging',
