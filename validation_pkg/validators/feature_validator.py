@@ -22,6 +22,7 @@ from validation_pkg.exceptions import (
 )
 from validation_pkg.utils.formats import FeatureFormat, CodingType
 
+#   TODO: in description of every feature there may be  ID=, should we replace also the ID in the desription?
 
 @dataclass
 class Feature:
@@ -48,7 +49,7 @@ class FeatureValidator:
     1. Detect and handle compression
     2. Parse features from file
     3. Validate feature coordinates and structure
-    4. Apply editing specifications
+    4. Apply editing specifications (sort, replace IDs)
     5. Collect statistics
     6. Convert to GFF format (if needed)
     7. Save to output directory
@@ -63,21 +64,27 @@ class FeatureValidator:
             sort_by_position: Sort features by position (default: True)
             check_coordinates: Validate that start < end (default: True)
             allow_zero_length: Allow zero-length features (start == end) (default: False)
+            allow_negative_coords: Allow negative coordinates (default: False)
+            replace_id_with: Replace the seqname/chromosome field (column 1) for all features
+                           with this value. Original seqname stored in Note attribute.
+                           (e.g., 'chr1' replaces all seqnames with 'chr1') (default: None)
             coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
             output_filename_suffix: Suffix to add to output filename (default: None)
             output_subdir_name: Subdirectory name for output files (default: None)
 
         Example:
             >>> settings = FeatureValidator.Settings()
-            >>> settings = settings.update(sort_by_position=True, coding_type='gz')
+            >>> settings = settings.update(sort_by_position=True, coding_type='gz', replace_id_with='chr1')
             >>> validator = FeatureValidator(feature_config, output_dir, settings)
         """
-        # TODO: Same prefix as for genomes - for every feature
         # Validation options
         sort_by_position: bool = True
         check_coordinates: bool = True
         allow_zero_length: bool = False
         allow_negative_coords: bool = False
+
+        # Editing options
+        replace_id_with: Optional[str] = None
 
         # Output format
         coding_type: Optional[str] = None
@@ -410,12 +417,85 @@ class FeatureValidator:
 
         self.logger.debug("✓ Feature validation passed")
 
+    def _parse_gff_attributes(self, attr_string: str) -> Dict[str, str]:
+        """
+        Parse GFF attributes string into dictionary.
+
+        GFF attributes are semicolon-separated key=value pairs:
+        "ID=gene1;Name=testGene;Note=description"
+
+        Args:
+            attr_string: GFF attributes string
+
+        Returns:
+            Dictionary of attribute key-value pairs
+
+        Example:
+            >>> attrs = self._parse_gff_attributes("ID=gene1;Name=test")
+            >>> attrs
+            {'ID': 'gene1', 'Name': 'test'}
+        """
+        if not attr_string or attr_string == '.':
+            return {}
+
+        attrs = {}
+        # Split by semicolon
+        for pair in attr_string.split(';'):
+            pair = pair.strip()
+            if not pair:
+                continue
+
+            # Split by first '=' only (values might contain '=')
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                attrs[key.strip()] = value.strip()
+            else:
+                # Malformed attribute, store as-is
+                self.logger.debug(f"Malformed GFF attribute (no '='): {pair}")
+
+        return attrs
+
+    def _build_gff_attributes(self, attr_dict: Dict[str, str]) -> str:
+        """
+        Build GFF attributes string from dictionary.
+
+        Creates semicolon-separated key=value pairs, with ID first if present.
+
+        Args:
+            attr_dict: Dictionary of attribute key-value pairs
+
+        Returns:
+            GFF attributes string
+
+        Example:
+            >>> attr_string = self._build_gff_attributes({'ID': 'gene1', 'Name': 'test'})
+            >>> attr_string
+            'ID=gene1;Name=test'
+        """
+        if not attr_dict:
+            return '.'
+
+        # Build list of key=value pairs, with ID first
+        parts = []
+
+        # ID should come first (GFF3 convention)
+        if 'ID' in attr_dict:
+            parts.append(f"ID={attr_dict['ID']}")
+
+        # Add all other attributes in sorted order (for consistency)
+        for key in sorted(attr_dict.keys()):
+            if key != 'ID':  # Skip ID, already added
+                parts.append(f"{key}={attr_dict[key]}")
+
+        return ';'.join(parts)
+
     def _apply_edits(self) -> None:
         """
         Apply editing specifications to features based on settings.
 
         Applies the following edits (if enabled in settings):
         - Sort features by position (sort_by_position)
+        - Replace feature seqname/chromosome field (replace_id_with)
         """
         self.logger.debug("Applying editing specifications from settings...")
 
@@ -424,6 +504,36 @@ class FeatureValidator:
             original_count = len(self.features)
             self.features.sort(key=lambda f: (f.seqname, f.start, f.end))
             self.logger.debug(f"Sorted {original_count} features by position")
+
+        # Replace feature seqnames (chromosome/sequence identifiers)
+        if self.settings.replace_id_with:
+            new_seqname = self.settings.replace_id_with
+            self.logger.debug(f"Replacing feature seqnames with '{new_seqname}'...")
+
+            for feature in self.features:
+                # Store original seqname in attributes
+                old_seqname = feature.seqname
+
+                if feature.original_format == 'gff':
+                    # Parse GFF attributes
+                    attrs = self._parse_gff_attributes(feature.attributes)
+
+                    # Store original seqname in Note field (GFF3 standard)
+                    note_text = f"Original_seqname:{old_seqname}"
+                    if 'Note' in attrs and attrs['Note']:
+                        # Append to existing Note
+                        attrs['Note'] = f"{attrs['Note']};{note_text}"
+                    else:
+                        # Create new Note
+                        attrs['Note'] = note_text
+
+                    # Rebuild attributes string
+                    feature.attributes = self._build_gff_attributes(attrs)
+
+                # Replace seqname for both GFF and BED
+                feature.seqname = new_seqname
+
+            self.logger.debug(f"Replaced {len(self.features)} feature seqnames with '{new_seqname}'")
 
         self.logger.debug(f"✓ Edits applied, {len(self.features)} feature(s) remaining")
 
