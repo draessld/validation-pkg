@@ -229,6 +229,9 @@ def validate_reads(
 
     results = []
     for read_config in read_configs:
+        settings.update(
+            output_subdir_name = read_config.ngs_type
+        )
         validator = ReadValidator(read_config, output_path, settings)
         validator.validate()
         results.append(validator.get_statistics())

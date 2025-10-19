@@ -52,6 +52,11 @@ class ReadValidator:
             coding_type: Output compression type ('gz', 'bz2', or None for uncompressed)
             output_filename_suffix: Optional suffix to add to output filename (e.g., 'filtered')
             output_subdir_name: Optional subdirectory name within output_dir for saving files
+            outdir_by_ngs_type: If True, automatically set output_subdir_name to ngs_type (default: False)
+
+        Note:
+            When outdir_by_ngs_type=True, output_subdir_name will be automatically set to the
+            read's ngs_type (illumina/ont/pacbio), overriding any manually set value.
 
         Example:
             >>> settings = ReadValidator.Settings()
@@ -72,6 +77,7 @@ class ReadValidator:
         coding_type: Optional[str] = None
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
+        outdir_by_ngs_type: bool = False
 
     def __init__(self, read_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
         """
@@ -93,6 +99,12 @@ class ReadValidator:
         self.read_config = read_config
         self.output_dir = Path(output_dir)
         self.settings = settings if settings is not None else self.Settings()
+
+        # Apply outdir_by_ngs_type if enabled
+        if self.settings.outdir_by_ngs_type:
+            # Override output_subdir_name with ngs_type
+            self.settings = self.settings.update(output_subdir_name=read_config.ngs_type)
+            self.logger.debug(f"Applied outdir_by_ngs_type: output_subdir_name set to '{read_config.ngs_type}'")
 
         # Log settings being used
         self.logger.debug(f"Initializing ReadValidator with settings:\n{self.settings}")

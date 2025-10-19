@@ -17,7 +17,8 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=[
-        # Add your package dependencies here
-        # Example: "numpy>=1.19.0",
+        pytest>=7.0.0,
+        biopython==1.85,
+        pysam>=0.19.0
     ],
 )

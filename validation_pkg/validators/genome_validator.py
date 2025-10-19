@@ -44,15 +44,28 @@ class GenomeValidator:
         """
         Settings for genome validation and processing.
         Attributes:
-            allow_empty_sequences: Allow SeqRecord empty seequence (default: False) 
+            allow_empty_sequences: Allow SeqRecord empty seequence (default: False)
             allow_empty_id: Allow SeqRecord empty ID (default: False)
             warn_n_sequences: Warn if number of sequences exceeds this (default: 2)
-            plasmid_split: Separate plasmid sequences into different file (default: True)
+            is_plasmid: Treat all sequences as plasmids (no main chromosome) (default: False)
+            plasmid_split: Separate plasmid sequences into different files (default: True)
+            plasmids_to_one: Merge all plasmid sequences into one file (default: False)
+            main_longest: Select longest sequence as main chromosome (default: True)
+            main_first: Select first sequence as main chromosome (default: False)
             replace_id_with: Prefix to add to sequence IDs, None = no prefix (default: None)
             min_sequence_length: Minimum sequence length to keep in bp, remove shorter (default: 100)
             coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
             output_filename_suffix: Suffix to add to output filename (default: None)
             output_subdir_name: Subdirectory name for output files (default: None)
+
+        Note:
+            - plasmid_split and plasmids_to_one are mutually exclusive - only one can be True.
+            - main_longest and main_first are mutually exclusive - only one can be True.
+            - When is_plasmid=True, all sequences are treated as plasmids:
+              - If plasmid_split=True: each sequence saved to separate file
+              - If plasmids_to_one=True: all sequences saved to one merged file
+              - If both False: all sequences saved to main output file
+            - Main selection (main_longest/main_first) only applies when is_plasmid=False
         """
 
         # Validation thresholds
@@ -61,14 +74,34 @@ class GenomeValidator:
         warn_n_sequences: int = 2   #   Raise Warning - set plasmid_split to True
 
         # Editing specifications
-        plasmid_split: bool = True 
-        replace_id_with: Optional[str] = None 
+        is_plasmid: bool = False
+        plasmid_split: bool = False
+        plasmids_to_one: bool = False
+        main_longest: bool = True
+        main_first: bool = False
+        replace_id_with: Optional[str] = None
         min_sequence_length: int = 100
 
         # Output format
         coding_type: Optional[str] = None
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
+
+        def __post_init__(self):
+            """Validate settings after initialization."""
+            if self.plasmid_split and self.plasmids_to_one:
+                raise ValueError(
+                    "plasmid_split and plasmids_to_one cannot both be True. "
+                    "Choose one: plasmid_split creates separate files for each plasmid, "
+                    "plasmids_to_one merges all plasmids into a single file."
+                )
+
+            if self.main_longest and self.main_first:
+                raise ValueError(
+                    "main_longest and main_first cannot both be True. "
+                    "Choose one: main_longest selects the longest sequence as main, "
+                    "main_first selects the first sequence as main."
+                )
 
     def __init__(self, genome_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
         """
@@ -308,49 +341,155 @@ class GenomeValidator:
                 record.id = f"{prefix}"
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
-        # 3. Split plasmid sequences
-        if self.settings.plasmid_split and len(self.sequences) > 1:
+        # 3. Handle plasmid sequences
+        if self.settings.is_plasmid:
+            # Treat all sequences as plasmids (no main chromosome)
+            self._handle_plasmid_file()
+        elif self.settings.plasmid_split and len(self.sequences) > 1:
+            # Normal mode: split plasmids from main chromosome
             self._split_plasmids()
+        elif self.settings.plasmids_to_one and len(self.sequences) > 1:
+            # Normal mode: merge plasmids into one file, keep main chromosome
+            self._merge_plasmids()
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
 
+    def _select_main_sequence(self, sequences: List[SeqRecord]) -> tuple[SeqRecord, List[SeqRecord]]:
+        """
+        Select main chromosome from sequences based on settings.
+
+        Args:
+            sequences: List of SeqRecord objects to choose from
+
+        Returns:
+            Tuple of (main_sequence, plasmid_sequences)
+
+        Raises:
+            ValueError: If neither main_longest nor main_first is True
+        """
+        if self.settings.main_longest:
+            # Sort by length (longest first)
+            sorted_sequences = sorted(sequences, key=lambda x: len(x.seq), reverse=True)
+            main_sequence = sorted_sequences[0]
+            plasmid_sequences = sorted_sequences[1:]
+            self.logger.debug(f"Selected longest sequence as main: {main_sequence.id} ({len(main_sequence.seq)} bp)")
+        elif self.settings.main_first:
+            # Keep original order, first is main
+            main_sequence = sequences[0]
+            plasmid_sequences = sequences[1:]
+            self.logger.debug(f"Selected first sequence as main: {main_sequence.id} ({len(main_sequence.seq)} bp)")
+        else:
+            # This should not happen due to __post_init__ validation
+            raise ValueError("Either main_longest or main_first must be True")
+
+        return main_sequence, plasmid_sequences
+
+    def _handle_plasmid_file(self) -> None:
+        """
+        Handle plasmid file where all sequences are plasmids (no main chromosome).
+
+        Based on settings:
+        - If plasmid_split=True: Save each sequence to separate file
+        - If plasmids_to_one=True: Save all sequences to one merged file
+        - If both False: Keep all sequences in main output (do nothing)
+        """
+        if len(self.sequences) == 0:
+            return
+
+        self.logger.debug(f"Handling plasmid file with {len(self.sequences)} sequence(s)...")
+
+        if self.settings.plasmid_split:
+            # Save each plasmid to separate file
+            self.logger.info(
+                f"Processing plasmid file: saving {len(self.sequences)} plasmid(s) "
+                f"to separate files"
+            )
+            for i, plasmid in enumerate(self.sequences):
+                # Save each plasmid individually (pass as list to reuse existing method)
+                self._save_plasmid_file([plasmid], i)
+
+            # Clear main sequences since all are saved as plasmids
+            self.sequences = []
+
+        elif self.settings.plasmids_to_one:
+            # Save all plasmids to one merged file
+            self.logger.info(
+                f"Processing plasmid file: merging {len(self.sequences)} plasmid(s) "
+                f"into one file"
+            )
+            self._save_merged_plasmid_file(self.sequences)
+
+            # Clear main sequences since all are saved as plasmids
+            self.sequences = []
+
+        else:
+            # Keep all sequences in main output file
+            self.logger.info(
+                f"Processing plasmid file: keeping all {len(self.sequences)} "
+                f"sequence(s) in main output file"
+            )
+            # No action needed - sequences stay in self.sequences
+
     def _split_plasmids(self) -> None:
         """
-        Split plasmid sequences into a separate file.
+        Split plasmid sequences into separate files.
 
-        When more than 2 sequences are present:
-        - Keep the longest sequence (assumed to be the chromosome) in main output
-        - Save remaining sequences (plasmids) to a separate file with "_plasmid" suffix
+        When more than 1 sequence is present:
+        - Select main sequence based on main_longest or main_first setting
+        - Save remaining sequences (plasmids) to separate files with "_plasmid" suffix
         - Uses same output settings (compression, subdirectory) as main file
         """
         self.logger.debug(f"Splitting plasmids from {len(self.sequences)} sequences...")
 
-        # Sort sequences by length (longest first)
-        sorted_sequences = sorted(self.sequences, key=lambda x: len(x.seq), reverse=True)
-
-        # Keep longest as main chromosome
-        main_sequence = [sorted_sequences[0]]
-        plasmid_sequences = sorted_sequences[1:]
+        # Select main sequence based on settings
+        main_sequence, plasmid_sequences = self._select_main_sequence(self.sequences)
 
         self.logger.info(
-            f"Splitting genome: keeping longest sequence ({sorted_sequences[0].id}, "
-            f"{len(sorted_sequences[0].seq)} bp) as main, "
+            f"Splitting genome: keeping sequence '{main_sequence.id}' "
+            f"({len(main_sequence.seq)} bp) as main, "
             f"saving {len(plasmid_sequences)} sequence(s) as plasmids"
         )
 
-        for i,plasmid in enumerate(plasmid_sequences):
-            # Save plasmid sequences to separate file
-            self._save_plasmid_file(plasmid_sequences,i)
+        for i, plasmid in enumerate(plasmid_sequences):
+            # Save each plasmid to separate file (pass as single-item list)
+            self._save_plasmid_file([plasmid], i)
 
         # Update main sequences to only include chromosome
-        self.sequences = main_sequence
+        self.sequences = [main_sequence]
 
-    def _save_plasmid_file(self, plasmid_sequences: SeqRecord, index: int) -> None:
+    def _merge_plasmids(self) -> None:
+        """
+        Merge all plasmid sequences into a single file.
+
+        When more than 1 sequence is present:
+        - Select main sequence based on main_longest or main_first setting
+        - Save ALL remaining sequences (plasmids) to a single file with "_plasmid" suffix
+        - Uses same output settings (compression, subdirectory) as main file
+        """
+        self.logger.debug(f"Merging plasmids from {len(self.sequences)} sequences...")
+
+        # Select main sequence based on settings
+        main_sequence, plasmid_sequences = self._select_main_sequence(self.sequences)
+
+        self.logger.info(
+            f"Merging genome: keeping sequence '{main_sequence.id}' "
+            f"({len(main_sequence.seq)} bp) as main, "
+            f"merging {len(plasmid_sequences)} sequence(s) into one plasmid file"
+        )
+
+        # Save all plasmid sequences to a single merged file
+        self._save_merged_plasmid_file(plasmid_sequences)
+
+        # Update main sequences to only include chromosome
+        self.sequences = [main_sequence]
+
+    def _save_plasmid_file(self, plasmid_sequences: List[SeqRecord], index: int) -> None:
         """
         Save plasmid sequences to a separate file.
 
         Args:
-            plasmid_sequences: List of SeqRecord objects for plasmids
+            plasmid_sequences: List of SeqRecord objects for plasmids (usually one plasmid)
+            index: Index number to append to filename
         """
         # Determine output directory (with optional subdirectory)
         output_dir = self.output_dir
@@ -398,6 +537,62 @@ class GenomeValidator:
         self.logger.info(f"Plasmid sequences saved: {plasmid_path}")
 
         # Log details about each plasmid
+        for seq in plasmid_sequences:
+            self.logger.debug(f"  Plasmid: {seq.id} ({len(seq.seq)} bp)")
+
+    def _save_merged_plasmid_file(self, plasmid_sequences: List[SeqRecord]) -> None:
+        """
+        Save all plasmid sequences to a single merged file.
+
+        Args:
+            plasmid_sequences: List of SeqRecord objects for plasmids to merge
+        """
+        # Determine output directory (with optional subdirectory)
+        output_dir = self.output_dir
+        if self.settings.output_subdir_name:
+            output_dir = output_dir / self.settings.output_subdir_name
+
+        # Create output directory
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate merged plasmid filename (no index number)
+        base_name = self.genome_config.filename
+        # Remove all suffixes
+        for suffix in self.input_path.suffixes:
+            base_name = base_name.replace(suffix, '')
+
+        # Add plasmid suffix and optional user suffix
+        if self.settings.output_filename_suffix:
+            plasmid_filename = f"{base_name}_{self.settings.output_filename_suffix}_plasmid.fasta"
+        else:
+            plasmid_filename = f"{base_name}_plasmid.fasta"
+
+        # Add compression extension if requested
+        coding = self.settings.coding_type
+
+        if coding in ('gz', 'gzip', CT.GZIP):
+            plasmid_filename += '.gz'
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
+            plasmid_filename += '.bz2'
+
+        plasmid_path = output_dir / plasmid_filename
+
+        # Write all plasmid sequences to single file with appropriate compression
+        self.logger.debug(f"Writing merged plasmid sequences to: {plasmid_path}")
+
+        if coding in ('gz', 'gzip', CT.GZIP):
+            with gzip.open(plasmid_path, 'wt') as handle:
+                SeqIO.write(plasmid_sequences, handle, 'fasta')
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
+            with bz2.open(plasmid_path, 'wt') as handle:
+                SeqIO.write(plasmid_sequences, handle, 'fasta')
+        else:
+            with open(plasmid_path, 'w') as handle:
+                SeqIO.write(plasmid_sequences, handle, 'fasta')
+
+        self.logger.info(f"Merged plasmid file saved: {plasmid_path} ({len(plasmid_sequences)} sequences)")
+
+        # Log details about each plasmid in the merged file
         for seq in plasmid_sequences:
             self.logger.debug(f"  Plasmid: {seq.id} ({len(seq.seq)} bp)")
 

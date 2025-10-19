@@ -5,7 +5,7 @@ Handles GFF, GTF, and BED formats with compression support.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple, IO
+from typing import Optional, Dict, Any, List, IO
 from dataclasses import dataclass
 import gzip
 import bz2
@@ -18,27 +18,27 @@ from validation_pkg.exceptions import (
     BedFormatError,
     GffFormatError,
     CompressionError,
-    FileNotFoundError as ValidationFileNotFoundError
 )
-from validation_pkg.utils.formats import FeatureFormat, CodingType
-
-#   TODO: in description of every feature there may be  ID=, should we replace also the ID in the desription?
+from validation_pkg.utils.formats import FeatureFormat
 
 @dataclass
 class Feature:
     """Represents a genomic feature (generic container for GFF/BED data)."""
-    seqname: str           # Sequence/chromosome name
-    start: int             # Start position (1-based for GFF, 0-based for BED)
-    end: int               # End position
-    feature_type: str = "" # Feature type (gene, CDS, etc.)
-    score: str = "."       # Score
-    strand: str = "+"      # Strand (+, -, .)
-    source: str = "."      # Source
-    frame: str = "."       # Frame (for CDS)
-    attributes: str = ""   # Attributes column (GFF) or name (BED)
+    seqname: str
+    start: int
+    end: int
+    feature_type: str = ""
+    score: str = "."
+    strand: str = "+"
+    source: str = "."
+    frame: str = "."
+    attributes: str = ""
+    original_format: str = "gff"
 
-    # Store original format to preserve information
-    original_format: str = "gff"  # 'gff' or 'bed'
+    @property
+    def length(self) -> int:
+        """Calculate feature length."""
+        return self.end - self.start
 
 
 class FeatureValidator:
@@ -252,6 +252,14 @@ class FeatureValidator:
             )
             raise exception_class(error_msg) from e
 
+    def _normalize_strand(self, strand: str) -> str:
+        """Normalize strand value to +, -, or ."""
+        return strand if strand in ['+', '-', '.'] else '.'
+
+    def _skip_line(self, line: str) -> bool:
+        """Check if line should be skipped (empty or comment)."""
+        return not line or line.startswith('#')
+
     def _parse_gff(self, handle) -> List[Feature]:
         """
         Parse GFF/GTF format file.
@@ -263,25 +271,17 @@ class FeatureValidator:
             List of Feature objects
         """
         features = []
-        line_num = 0
-
-        for line in handle:
-            line_num += 1
+        for line_num, line in enumerate(handle, start=1):
             line = line.strip()
-
-            # Skip comments and empty lines
-            if not line or line.startswith('#'):
+            if self._skip_line(line):
                 continue
 
-            # Parse GFF line
             try:
                 parts = line.split('\t')
                 if len(parts) < 8:
-                    self.logger.add_validation_issue(
-                        level='WARNING',
-                        category='feature',
-                        message=f"Invalid GFF line (expected 8-9 columns, got {len(parts)})",
-                        details={'line': line_num, 'content': line[:100]}
+                    self._log_parse_warning(
+                        f"Invalid GFF line (expected 8-9 columns, got {len(parts)})",
+                        line_num, line
                     )
                     continue
 
@@ -289,10 +289,10 @@ class FeatureValidator:
                     seqname=parts[0],
                     source=parts[1],
                     feature_type=parts[2],
-                    start=int(parts[3]),  # GFF is 1-based
+                    start=int(parts[3]),
                     end=int(parts[4]),
                     score=parts[5],
-                    strand=parts[6] if parts[6] in ['+', '-', '.'] else '.',
+                    strand=self._normalize_strand(parts[6]),
                     frame=parts[7],
                     attributes=parts[8] if len(parts) > 8 else "",
                     original_format="gff"
@@ -300,15 +300,22 @@ class FeatureValidator:
                 features.append(feature)
 
             except (ValueError, IndexError) as e:
-                self.logger.add_validation_issue(
-                    level='WARNING',
-                    category='feature',
-                    message=f"Failed to parse GFF line: {e}",
-                    details={'line': line_num, 'error': str(e)}
-                )
+                self._log_parse_warning(f"Failed to parse GFF line: {e}", line_num)
                 continue
 
         return features
+
+    def _log_parse_warning(self, message: str, line_num: int, content: str = "") -> None:
+        """Log a parsing warning."""
+        details = {'line': line_num}
+        if content:
+            details['content'] = content[:100]
+        self.logger.add_validation_issue(
+            level='WARNING',
+            category='feature',
+            message=message,
+            details=details
+        )
 
     def _parse_bed(self, handle) -> List[Feature]:
         """
@@ -321,49 +328,36 @@ class FeatureValidator:
             List of Feature objects
         """
         features = []
-        line_num = 0
-
-        for line in handle:
-            line_num += 1
+        for line_num, line in enumerate(handle, start=1):
             line = line.strip()
-
-            # Skip comments and empty lines
-            if not line or line.startswith('#'):
+            if self._skip_line(line):
                 continue
 
-            # Parse BED line
             try:
                 parts = line.split('\t')
                 if len(parts) < 3:
-                    self.logger.add_validation_issue(
-                        level='WARNING',
-                        category='feature',
-                        message=f"Invalid BED line (expected at least 3 columns, got {len(parts)})",
-                        details={'line': line_num, 'content': line[:100]}
+                    self._log_parse_warning(
+                        f"Invalid BED line (expected at least 3 columns, got {len(parts)})",
+                        line_num, line
                     )
                     continue
 
                 feature = Feature(
                     seqname=parts[0],
-                    start=int(parts[1]),  # BED is 0-based
+                    start=int(parts[1]),
                     end=int(parts[2]),
-                    attributes=parts[3] if len(parts) > 3 else "",  # name column
+                    attributes=parts[3] if len(parts) > 3 else "",
                     score=parts[4] if len(parts) > 4 else ".",
-                    strand=parts[5] if len(parts) > 5 and parts[5] in ['+', '-', '.'] else '.',
+                    strand=self._normalize_strand(parts[5]) if len(parts) > 5 else '.',
                     source=".",
-                    feature_type="region",  # BED doesn't have type, use generic
+                    feature_type="region",
                     frame=".",
                     original_format="bed"
                 )
                 features.append(feature)
 
             except (ValueError, IndexError) as e:
-                self.logger.add_validation_issue(
-                    level='WARNING',
-                    category='feature',
-                    message=f"Failed to parse BED line: {e}",
-                    details={'line': line_num, 'error': str(e)}
-                )
+                self._log_parse_warning(f"Failed to parse BED line: {e}", line_num)
                 continue
 
         return features
@@ -373,49 +367,46 @@ class FeatureValidator:
         self.logger.debug("Validating features...")
 
         for idx, feature in enumerate(self.features):
-            # Check coordinates
-            if self.settings.check_coordinates:
-                if feature.start > feature.end:
-                    error_msg = f"Feature has start > end: {feature.seqname}:{feature.start}-{feature.end}"
-                    self.logger.add_validation_issue(
-                        level='ERROR',
-                        category='feature',
-                        message=error_msg,
-                        details={
-                            'feature_index': idx,
-                            'seqname': feature.seqname,
-                            'start': feature.start,
-                            'end': feature.end
-                        }
-                    )
-                    raise FeatureValidationError(error_msg)
-
-                if feature.start == feature.end and not self.settings.allow_zero_length:
-                    error_msg = f"Zero-length feature not allowed: {feature.seqname}:{feature.start}-{feature.end}"
-                    self.logger.add_validation_issue(
-                        level='ERROR',
-                        category='feature',
-                        message=error_msg,
-                        details={
-                            'feature_index': idx,
-                            'seqname': feature.seqname,
-                            'position': feature.start
-                        }
-                    )
-                    raise FeatureValidationError(error_msg)
-
-            # Check for negative coordinates
-            if not self.settings.allow_negative_coords and (feature.start < 0 or feature.end < 0):
-                error_msg = f"Negative coordinates not allowed: {feature.seqname}:{feature.start}-{feature.end}"
-                self.logger.add_validation_issue(
-                    level='ERROR',
-                    category='feature',
-                    message=error_msg,
-                    details={'feature_index': idx, 'seqname': feature.seqname}
-                )
-                raise FeatureValidationError(error_msg)
+            self._validate_coordinates(feature, idx)
+            self._validate_negative_coords(feature, idx)
 
         self.logger.debug("✓ Feature validation passed")
+
+    def _validate_coordinates(self, feature: Feature, idx: int) -> None:
+        """Validate feature coordinates."""
+        if not self.settings.check_coordinates:
+            return
+
+        if feature.start > feature.end:
+            self._raise_validation_error(
+                f"Feature has start > end: {feature.seqname}:{feature.start}-{feature.end}",
+                {'feature_index': idx, 'seqname': feature.seqname,
+                 'start': feature.start, 'end': feature.end}
+            )
+
+        if feature.start == feature.end and not self.settings.allow_zero_length:
+            self._raise_validation_error(
+                f"Zero-length feature not allowed: {feature.seqname}:{feature.start}-{feature.end}",
+                {'feature_index': idx, 'seqname': feature.seqname, 'position': feature.start}
+            )
+
+    def _validate_negative_coords(self, feature: Feature, idx: int) -> None:
+        """Validate feature doesn't have negative coordinates."""
+        if not self.settings.allow_negative_coords and (feature.start < 0 or feature.end < 0):
+            self._raise_validation_error(
+                f"Negative coordinates not allowed: {feature.seqname}:{feature.start}-{feature.end}",
+                {'feature_index': idx, 'seqname': feature.seqname}
+            )
+
+    def _raise_validation_error(self, message: str, details: Dict[str, Any]) -> None:
+        """Log and raise a validation error."""
+        self.logger.add_validation_issue(
+            level='ERROR',
+            category='feature',
+            message=message,
+            details=details
+        )
+        raise FeatureValidationError(message)
 
     def _parse_gff_attributes(self, attr_string: str) -> Dict[str, str]:
         """
@@ -544,23 +535,14 @@ class FeatureValidator:
         if not self.features:
             return
 
-        # Count by type
         type_counts = {}
         strand_counts = {'+': 0, '-': 0, '.': 0}
-        lengths = []
+        lengths = [f.length for f in self.features]
 
         for feature in self.features:
-            # Count by type
-            ftype = feature.feature_type
-            type_counts[ftype] = type_counts.get(ftype, 0) + 1
-
-            # Count by strand
+            type_counts[feature.feature_type] = type_counts.get(feature.feature_type, 0) + 1
             if feature.strand in strand_counts:
                 strand_counts[feature.strand] += 1
-
-            # Calculate length
-            length = feature.end - feature.start
-            lengths.append(length)
 
         self.statistics = {
             'num_features': len(self.features),
@@ -606,56 +588,49 @@ class FeatureValidator:
         """
         self.logger.debug("Saving output file...")
 
-        # Determine output directory (with optional subdirectory)
+        output_path = self._get_output_path()
+        self._write_output_file(output_path)
+
+        self.logger.info(f"Output saved: {output_path}")
+        return output_path
+
+    def _get_output_path(self) -> Path:
+        """Determine the output file path."""
         output_dir = self.output_dir
         if self.settings.output_subdir_name:
             output_dir = output_dir / self.settings.output_subdir_name
-
-        # Create output directory
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate output filename from original filename (without compression extension)
         base_name = self.feature_config.filename
-        # Remove all suffixes
         for suffix in self.input_path.suffixes:
             base_name = base_name.replace(suffix, '')
 
-        # Determine output format extension
-        if any(f.original_format == 'gff' for f in self.features):
-            format_ext = '.gff'
-        else:
-            format_ext = '.bed'
+        format_ext = '.gff' if any(f.original_format == 'gff' for f in self.features) else '.bed'
 
-        # Add suffix if specified
         if self.settings.output_filename_suffix:
             output_filename = f"{base_name}_{self.settings.output_filename_suffix}{format_ext}"
         else:
             output_filename = f"{base_name}{format_ext}"
 
-        # Add compression extension if requested
         if self.settings.coding_type == 'gz':
             output_filename += '.gz'
         elif self.settings.coding_type == 'bz2':
             output_filename += '.bz2'
 
-        output_path = output_dir / output_filename
+        return output_dir / output_filename
 
-        # Write output with appropriate compression
+    def _write_output_file(self, output_path: Path) -> None:
+        """Write features to output file with appropriate compression."""
         self.logger.debug(f"Writing output to: {output_path}")
 
-        if self.settings.coding_type == 'gz':
-            with gzip.open(output_path, 'wt') as handle:
-                self._write_features(handle)
-        elif self.settings.coding_type == 'bz2':
-            with bz2.open(output_path, 'wt') as handle:
-                self._write_features(handle)
-        else:
-            with open(output_path, 'w') as handle:
-                self._write_features(handle)
+        open_func = {
+            'gz': lambda p: gzip.open(p, 'wt'),
+            'bz2': lambda p: bz2.open(p, 'wt'),
+            None: lambda p: open(p, 'w')
+        }.get(self.settings.coding_type, lambda p: open(p, 'w'))
 
-        self.logger.info(f"Output saved: {output_path}")
-
-        return output_path
+        with open_func(output_path) as handle:
+            self._write_features(handle)
 
     def _write_features(self, handle: IO) -> None:
         """
