@@ -17,7 +17,8 @@ class TestLogger:
         """Reset logger state before each test."""
         logger = get_logger()
         logger.clear_issues()
-        logger.logger.handlers.clear()
+        # Reset logger instance (structlog doesn't use handlers in the same way)
+        logger.logger = None
         yield
         logger.clear_issues()
     

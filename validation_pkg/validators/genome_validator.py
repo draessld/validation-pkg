@@ -48,7 +48,7 @@ class GenomeValidator:
             allow_empty_id: Allow SeqRecord empty ID (default: False)
             warn_n_sequences: Warn if number of sequences exceeds this (default: 2)
             is_plasmid: Treat all sequences as plasmids (no main chromosome) (default: False)
-            plasmid_split: Separate plasmid sequences into different files (default: True)
+            plasmid_split: Separate plasmid sequences into different files (default: False)
             plasmids_to_one: Merge all plasmid sequences into one file (default: False)
             main_longest: Select longest sequence as main chromosome (default: True)
             main_first: Select first sequence as main chromosome (default: False)

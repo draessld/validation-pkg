@@ -1,4 +1,11 @@
 from setuptools import setup, find_packages
+from pathlib import Path
+
+# Read requirements from requirements.txt
+def read_requirements():
+    requirements_path = Path(__file__).parent / "requirements.txt"
+    with open(requirements_path) as f:
+        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 setup(
     name="validation_pkg",
@@ -16,9 +23,5 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.7",
-    install_requires=[
-        pytest>=7.0.0,
-        biopython==1.85,
-        pysam>=0.19.0
-    ],
+    install_requires=read_requirements(),
 )

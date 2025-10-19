@@ -158,7 +158,7 @@ class TestGenomeValidatorParsing:
         return fasta_file
 
     def test_parse_simple_fasta(self, simple_fasta, output_dir, default_settings):
-        """Test parsing a simple FASTA file."""
+        """Test parsing a simple FASTA file with two sequences."""
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=simple_fasta,
@@ -169,9 +169,12 @@ class TestGenomeValidatorParsing:
         validator = GenomeValidator(genome_config, output_dir, default_settings)
         validator.validate()
 
-        assert len(validator.sequences) == 1
+        # With plasmid_split=False (default), both sequences remain
+        assert len(validator.sequences) == 2
         assert validator.sequences[0].id == "seq1"
         assert str(validator.sequences[0].seq) == "ATCGATCGATCGATCGATCG"
+        assert validator.sequences[1].id == "seq2"
+        assert str(validator.sequences[1].seq) == "GCTAGCTAGCTAGCTAGCTA"
 
     def test_parse_genbank(self, simple_genbank, output_dir, default_settings):
         """Test parsing a GenBank file."""
@@ -726,20 +729,20 @@ class TestGenomeValidatorPlasmidSplit:
         assert plasmid_file0.exists()
         assert plasmid_file1.exists()
 
-        # Note: The current implementation saves all plasmids to each file (bug)
-        # Each file will contain all 2 plasmids
+        # Each file should contain exactly one plasmid
         plasmid_seqs0 = list(SeqIO.parse(plasmid_file0, 'fasta'))
         plasmid_seqs1 = list(SeqIO.parse(plasmid_file1, 'fasta'))
 
-        # Currently both files contain all plasmids (this is a bug in the implementation)
-        assert len(plasmid_seqs0) == 2
-        assert len(plasmid_seqs1) == 2
+        assert len(plasmid_seqs0) == 1
+        assert len(plasmid_seqs1) == 1
 
         # Verify plasmids are sorted by length (longest first)
+        # plasmid0 contains the longest plasmid (plasmid2)
         assert plasmid_seqs0[0].id == "plasmid2"
         assert len(plasmid_seqs0[0].seq) == 1000
-        assert plasmid_seqs0[1].id == "plasmid1"
-        assert len(plasmid_seqs0[1].seq) == 500
+        # plasmid1 contains the second longest plasmid (plasmid1)
+        assert plasmid_seqs1[0].id == "plasmid1"
+        assert len(plasmid_seqs1[0].seq) == 500
 
     def test_plasmid_split_disabled(self, fasta_with_plasmids, output_dir):
         """Test that plasmid split can be disabled (warning issued but split doesn't happen)."""
@@ -859,14 +862,14 @@ class TestGenomeValidatorPlasmidSplit:
             main_seqs = list(SeqIO.parse(f, 'fasta'))
             assert len(main_seqs) == 1
 
-        # Both plasmid files will contain all plasmids (current implementation bug)
+        # Each plasmid file contains exactly one plasmid
         with gzip.open(plasmid_file0, 'rt') as f:
             plasmid_seqs0 = list(SeqIO.parse(f, 'fasta'))
-            assert len(plasmid_seqs0) == 2
+            assert len(plasmid_seqs0) == 1
 
         with gzip.open(plasmid_file1, 'rt') as f:
             plasmid_seqs1 = list(SeqIO.parse(f, 'fasta'))
-            assert len(plasmid_seqs1) == 2
+            assert len(plasmid_seqs1) == 1
 
     def test_plasmid_split_with_subdirectory(self, fasta_with_plasmids, output_dir):
         """Test plasmid split outputs to subdirectory."""

@@ -349,13 +349,12 @@ class TestGenomeValidatorIntegration:
         plasmid_files = sorted(output_dir.glob("*_plasmid*.fasta"))
         assert len(plasmid_files) == 4
 
-        # Verify plasmids are sorted by length (longest first)
-        # Note: Current implementation saves all plasmids to each file (bug)
+        # Verify plasmids are correctly split (one plasmid per file)
         for i, plasmid_file in enumerate(plasmid_files):
             with open(plasmid_file, 'r') as f:
                 plasmid_records = list(SeqIO.parse(f, 'fasta'))
-                # Due to bug, all files contain all plasmids
-                assert len(plasmid_records) == 4
+                # Each file should contain exactly one plasmid
+                assert len(plasmid_records) == 1
 
     def test_output_with_compression(self, fixtures_dir, output_dir):
         """Test output with different compression formats."""
