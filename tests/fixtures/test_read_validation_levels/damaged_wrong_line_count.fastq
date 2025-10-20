@@ -1,0 +1,6 @@
+@READ1 Damaged - missing quality line
+ATCGATCGATCGATCGATCGATCGATCGATCG
++
+@READ2 This should fail - only 6 lines total, not divisible by 4
+GCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA
++

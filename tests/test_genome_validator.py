@@ -73,7 +73,6 @@ class TestGenomeValidatorInitialization:
         assert validator.output_dir == output_dir
         assert validator.settings is not None
         assert validator.sequences == []
-        assert isinstance(validator.statistics, dict)
 
     def test_init_with_custom_settings(self, simple_fasta, output_dir):
         """Test initialization with custom settings."""
@@ -349,7 +348,7 @@ class TestGenomeValidatorValidation:
 
         validator = GenomeValidator(genome_config, output_dir, default_settings)
 
-        with pytest.raises(FastaFormatError, match="zero length"):
+        with pytest.raises(GenomeValidationError, match="zero length"):
             validator.validate()
 
 
@@ -423,67 +422,6 @@ class TestGenomeValidatorEditing:
         assert any("short_seq" in seq.description for seq in validator.sequences)
         assert any("medium_seq" in seq.description for seq in validator.sequences)
         assert any("long_seq" in seq.description for seq in validator.sequences)
-
-
-class TestGenomeValidatorStatistics:
-    """Test statistics collection."""
-
-    @pytest.fixture
-    def temp_dir(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield Path(tmpdir)
-
-    @pytest.fixture
-    def output_dir(self, temp_dir):
-        out_dir = temp_dir / "output"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        return out_dir
-
-    @pytest.fixture
-    def default_settings(self):
-        """Default settings that don't filter sequences."""
-        return GenomeValidator.Settings(min_sequence_length=0)
-
-    @pytest.fixture
-    def fasta_for_stats(self, temp_dir):
-        """Create FASTA with known statistics."""
-        fasta_file = temp_dir / "stats.fasta"
-        with open(fasta_file, "w") as f:
-            f.write(">seq1\n")
-            f.write("ATCGATCG\n")  # 8bp, 50% GC
-            f.write(">seq2\n")
-            f.write("GCGCGCGCGCGC\n")  # 12bp, 100% GC
-        return fasta_file
-
-    def test_statistics_collection(self, fasta_for_stats, output_dir):
-        """Test that statistics are collected correctly."""
-        # Use custom settings to avoid plasmid split triggering with 2 sequences
-        settings = GenomeValidator.Settings(
-            min_sequence_length=0,
-            warn_n_sequences=10,  # Set high to avoid forced split
-            plasmid_split=False  # Explicitly disable
-        )
-
-        genome_config = GenomeConfig(
-            filename="stats.fasta",
-            filepath=fasta_for_stats,
-            coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
-        )
-
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
-
-        stats = validator.get_statistics()
-
-        assert stats['num_sequences'] == 2
-        assert stats['total_length'] == 20
-        assert stats['min_length'] == 8
-        assert stats['max_length'] == 12
-        assert stats['avg_length'] == 10.0
-        # GC content: (4 + 12) / 20 = 80%
-        assert 79 < stats['gc_content'] < 81
-
 
 class TestGenomeValidatorOutput:
     """Test output generation."""
@@ -897,6 +835,404 @@ class TestGenomeValidatorPlasmidSplit:
         plasmid_file1 = output_dir / "genomes" / "genome_plasmids_plasmid1.fasta"
         assert plasmid_file0.exists()
         assert plasmid_file1.exists()
+
+
+class TestGenomeValidatorValidationLevels:
+    """Test multi-level validation modes (strict, trust, minimal)."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def output_dir(self, temp_dir):
+        out_dir = temp_dir / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    @pytest.fixture
+    def multi_seq_fasta(self, temp_dir):
+        """Create a FASTA file with multiple sequences."""
+        fasta_file = temp_dir / "genome.fasta"
+        with open(fasta_file, "w") as f:
+            f.write(">chr1\n")
+            f.write("ATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG\n")
+            f.write(">chr2\n")
+            f.write("GCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA\n")
+            f.write(">plasmid1\n")
+            f.write("GGCCGGCCGGCCGGCCGGCCGGCCGGCCGGCCGGCCGGCCGGCC\n")
+        return fasta_file
+
+    @pytest.fixture
+    def damaged_fasta(self, temp_dir):
+        """Create a FASTA file with empty ID."""
+        fasta_file = temp_dir / "damaged.fasta"
+        with open(fasta_file, "w") as f:
+            f.write(">\n")  # Empty ID
+            f.write("ATCGATCGATCGATCGATCG\n")
+        return fasta_file
+
+    # ===== Tests for STRICT validation level =====
+
+    def test_strict_correct_file_passes(self, multi_seq_fasta, output_dir):
+        """Test strict mode with correct FASTA file - should pass."""
+        settings = GenomeValidator.Settings(
+            validation_level='strict',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Output file should exist
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 1
+
+        # Check that all sequences remain (plasmid_split=False by default)
+        assert len(validator.sequences) == 3
+
+    def test_strict_damaged_file_fails(self, damaged_fasta, output_dir):
+        """Test strict mode with damaged file - should fail."""
+        settings = GenomeValidator.Settings(
+            validation_level='strict',
+            allow_empty_id=False,
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="damaged.fasta",
+            filepath=damaged_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+
+        with pytest.raises(GenomeValidationError, match="has no ID"):
+            validator.validate()
+
+    def test_strict_applies_edits(self, multi_seq_fasta, output_dir):
+        """Test strict mode applies all edits."""
+        settings = GenomeValidator.Settings(
+            validation_level='strict',
+            replace_id_with='genome',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Check that ID replacement was applied
+        output_file = list(output_dir.glob("*.fasta"))[0]
+        with open(output_file, 'r') as f:
+            sequences = list(SeqIO.parse(f, 'fasta'))
+            # All sequences should have replaced ID
+            assert all(seq.id == 'genome' for seq in sequences)
+
+    # ===== Tests for TRUST validation level =====
+
+    def test_trust_correct_file_passes(self, multi_seq_fasta, output_dir):
+        """Test trust mode with correct FASTA file - should pass."""
+        settings = GenomeValidator.Settings(
+            validation_level='trust',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Should parse ALL sequences, all remain (plasmid_split=False by default)
+        assert len(validator.sequences) == 3
+        # Output file: main file with all sequences
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 1
+
+    def test_trust_damaged_first_sequence_fails(self, damaged_fasta, output_dir):
+        """Test trust mode detects error in first sequence."""
+        settings = GenomeValidator.Settings(
+            validation_level='trust',
+            allow_empty_id=False,
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="damaged.fasta",
+            filepath=damaged_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+
+        # Should fail because first sequence has empty ID
+        with pytest.raises(GenomeValidationError, match="has no ID"):
+            validator.validate()
+
+    def test_trust_applies_edits(self, multi_seq_fasta, output_dir):
+        """Test trust mode applies all edits to all sequences."""
+        settings = GenomeValidator.Settings(
+            validation_level='trust',
+            replace_id_with='genome',
+            min_sequence_length=0,
+            plasmid_split=True  # Enable plasmid split to test edits on all sequences
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Check that ID replacement was applied to ALL sequences
+        # Main sequence + plasmid files
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 3  # main + 2 plasmids
+
+        # Check all output files - ID should be replaced in all
+        for output_file in output_files:
+            with open(output_file, 'r') as f:
+                sequences = list(SeqIO.parse(f, 'fasta'))
+                # Each file has 1 sequence
+                assert len(sequences) == 1
+                # All sequences should have replaced ID
+                assert sequences[0].id == 'genome'
+
+    def test_trust_filters_short_sequences(self, multi_seq_fasta, output_dir):
+        """Test trust mode applies min_sequence_length filter."""
+        settings = GenomeValidator.Settings(
+            validation_level='trust',
+            min_sequence_length=100  # Will filter out all test sequences
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # All sequences should be filtered out
+        assert len(validator.sequences) == 0
+
+    def test_trust_handles_plasmids(self, multi_seq_fasta, output_dir):
+        """Test trust mode handles plasmid splitting."""
+        settings = GenomeValidator.Settings(
+            validation_level='trust',
+            plasmid_split=True,
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Should have main file + 2 plasmid files
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 3
+
+        # Check main file
+        main_file = output_dir / "genome.fasta"
+        assert main_file.exists()
+
+        # Check plasmid files
+        plasmid_files = list(output_dir.glob("*_plasmid*.fasta"))
+        assert len(plasmid_files) == 2
+
+    # ===== Tests for MINIMAL validation level =====
+
+    def test_minimal_correct_file_passes(self, multi_seq_fasta, output_dir):
+        """Test minimal mode with correct file - should pass without validation."""
+        settings = GenomeValidator.Settings(
+            validation_level='minimal',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # No sequences parsed in minimal mode
+        assert len(validator.sequences) == 0
+        # Output file should exist (copy)
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 1
+
+    def test_minimal_damaged_file_passes(self, damaged_fasta, output_dir):
+        """Test minimal mode with damaged file - should pass (no validation)."""
+        settings = GenomeValidator.Settings(
+            validation_level='minimal',
+            allow_empty_id=False,  # Ignored in minimal mode
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="damaged.fasta",
+            filepath=damaged_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        # Should NOT raise - minimal mode doesn't validate
+        validator.validate()
+
+        # Output should be created
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 1
+
+    def test_minimal_output_is_copy(self, multi_seq_fasta, output_dir):
+        """Test that minimal mode copies file as-is."""
+        settings = GenomeValidator.Settings(
+            validation_level='minimal',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Check output file exists
+        output_files = list(output_dir.glob("*.fasta"))
+        assert len(output_files) == 1
+
+        # Verify output is byte-for-byte identical to input
+        with open(multi_seq_fasta, 'rb') as f_in, open(output_files[0], 'rb') as f_out:
+            assert f_in.read() == f_out.read()
+
+    def test_minimal_does_not_apply_edits(self, multi_seq_fasta, output_dir):
+        """Test minimal mode does NOT apply edits."""
+        settings = GenomeValidator.Settings(
+            validation_level='minimal',
+            replace_id_with='genome',  # Should be ignored
+            min_sequence_length=100  # Should be ignored
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Output should be identical to input (no edits applied)
+        output_file = list(output_dir.glob("*.fasta"))[0]
+        with open(output_file, 'r') as f:
+            sequences = list(SeqIO.parse(f, 'fasta'))
+            # Should have all 3 sequences (no filtering)
+            assert len(sequences) == 3
+            # IDs should be original (no replacement)
+            assert sequences[0].id == 'chr1'
+            assert sequences[1].id == 'chr2'
+            assert sequences[2].id == 'plasmid1'
+
+    # ===== Tests for compressed files =====
+
+    def test_trust_compressed_gz_passes(self, temp_dir, output_dir):
+        """Test trust mode with gzip compressed file."""
+        fasta_file = temp_dir / "genome.fasta.gz"
+        with gzip.open(fasta_file, "wt") as f:
+            f.write(">chr1\n")
+            f.write("ATCGATCGATCGATCGATCGATCGATCGATCG\n")
+            f.write(">chr2\n")
+            f.write("GCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA\n")
+
+        settings = GenomeValidator.Settings(
+            validation_level='trust',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta.gz",
+            filepath=fasta_file,
+            coding_type=CodingType.GZIP,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # All sequences remain (plasmid_split=False by default)
+        assert len(validator.sequences) == 2
+
+    def test_minimal_compressed_bz2_passes(self, temp_dir, output_dir):
+        """Test minimal mode with bzip2 compressed file."""
+        fasta_file = temp_dir / "genome.fasta.bz2"
+        with bz2.open(fasta_file, "wt") as f:
+            f.write(">chr1\n")
+            f.write("ATCGATCGATCGATCGATCGATCGATCGATCG\n")
+
+        settings = GenomeValidator.Settings(
+            validation_level='minimal',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta.bz2",
+            filepath=fasta_file,
+            coding_type=CodingType.BZIP2,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator.validate()
+
+        # Output should exist and be copied
+        output_files = list(output_dir.glob("*.bz2"))
+        assert len(output_files) == 1
+
+    # ===== Test for invalid validation level =====
+
+    def test_invalid_validation_level_raises_error(self, multi_seq_fasta, output_dir):
+        """Test that invalid validation level raises ValueError."""
+        settings = GenomeValidator.Settings(
+            validation_level='invalid_mode',
+            min_sequence_length=0
+        )
+        genome_config = GenomeConfig(
+            filename="genome.fasta",
+            filepath=multi_seq_fasta,
+            coding_type=CodingType.NONE,
+            detected_format=GenomeFormat.FASTA
+        )
+
+        with pytest.raises(ValueError, match="Invalid validation_level"):
+            GenomeValidator(genome_config, output_dir, settings)
 
 
 if __name__ == "__main__":

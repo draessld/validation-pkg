@@ -161,8 +161,6 @@ def validate_genome(
     validator = GenomeValidator(genome_config, output_path, settings)
     validator.validate()
 
-    return validator.get_statistics()
-
 
 def validate_read(
     read_config,
@@ -195,8 +193,6 @@ def validate_read(
     validator = ReadValidator(read_config, output_path, settings)
     validator.validate()
 
-    return validator.get_statistics()
-
 
 def validate_reads(
     read_configs: List,
@@ -227,16 +223,12 @@ def validate_reads(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    results = []
     for read_config in read_configs:
         settings.update(
             output_subdir_name = read_config.ngs_type
         )
         validator = ReadValidator(read_config, output_path, settings)
         validator.validate()
-        results.append(validator.get_statistics())
-
-    return results
 
 
 def validate_feature(

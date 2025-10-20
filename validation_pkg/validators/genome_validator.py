@@ -67,6 +67,7 @@ class GenomeValidator:
               - If both False: all sequences saved to main output file
             - Main selection (main_longest/main_first) only applies when is_plasmid=False
         """
+        validation_level: str = 'strict'  # 'strict', 'trust', or 'minimal'
 
         # Validation thresholds
         allow_empty_sequences: bool = False #   Raise ERROR
@@ -74,16 +75,18 @@ class GenomeValidator:
         warn_n_sequences: int = 2   #   Raise Warning - set plasmid_split to True
 
         # Editing specifications
+        #   TODO: plasmid handeling better
         is_plasmid: bool = False
         plasmid_split: bool = False
         plasmids_to_one: bool = False
         main_longest: bool = True
         main_first: bool = False
+
         replace_id_with: Optional[str] = None
         min_sequence_length: int = 100
 
         # Output format
-        coding_type: Optional[str] = None
+        coding_type: Optional[str] = None 
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
 
@@ -121,8 +124,16 @@ class GenomeValidator:
         """
         self.logger = get_logger()
         self.genome_config = genome_config
-        self.output_dir = Path(output_dir)
+        self.output_dir = output_dir
         self.settings = settings if settings is not None else self.Settings()
+
+        # Validate validation_level setting
+        valid_levels = {'strict', 'trust', 'minimal'}
+        if self.settings.validation_level not in valid_levels:
+            raise ValueError(
+                f"Invalid validation_level '{self.settings.validation_level}'. "
+                f"Must be one of: {', '.join(valid_levels)}"
+            )
 
         # Log settings being used
         self.logger.debug(f"Initializing GenomeValidator with settings:\n{self.settings}")
@@ -133,15 +144,6 @@ class GenomeValidator:
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
 
-        # Statistics
-        self.statistics = {
-            'num_sequences': 0,
-            'total_length': 0,
-            'gc_content': 0.0,
-            'min_length': 0,
-            'max_length': 0,
-            'avg_length': 0.0
-        }
     
     def validate(self) -> None:
         """
@@ -156,26 +158,17 @@ class GenomeValidator:
         self.logger.debug(f"Format: {self.genome_config.detected_format}, Compression: {self.genome_config.coding_type}")
 
         try:
-            # File existence already checked by ConfigManager
-            # Format and compression already detected in genome_config
-
-            # Step 1: Parse and validate
             self._parse_file()
 
-            # Step 2: Apply editing specifications
-            self._apply_edits()
+            self._validate_sequences()
 
-            # Step 3: Collect statistics
-            self._collect_statistics()
-
-            # Step 4: Convert to FASTA (if needed)
             self._convert_to_fasta()
 
-            # Step 5: Save to output directory
+            self._apply_edits() # include plasmid handle
+
             output_path = self._save_output()
 
             self.logger.info(f"✓ Genome validation completed: {output_path.name}")
-            self.logger.debug(f"Statistics: {self.statistics}")
 
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")
@@ -213,16 +206,30 @@ class GenomeValidator:
             raise
     
     def _parse_file(self) -> None:
-        """Parse file using BioPython and validate format from genome_config."""
-        self.logger.debug(f"Parsing {self.genome_config.detected_format} file...")
+        """
+        Parse file using BioPython and validate format from genome_config.
 
+        Behavior depends on validation_level:
+        - 'strict': Parse all sequences, validate all
+        - 'trust': Parse all sequences, validate only first one
+        - 'minimal': Skip parsing entirely
+        """
+        self.logger.debug(f"Parsing {self.genome_config.detected_format} file (validation_level={self.settings.validation_level})...")
+
+        # Minimal mode - skip parsing
+        if self.settings.validation_level == 'minimal':
+            self.logger.info("Minimal validation mode - skipping file parsing")
+            self.sequences = []
+            return
+
+        # Trust and Strict modes - parse all sequences
         try:
             with self._open_file() as handle:
                 # Parse using BioPython with clean enum conversion
                 biopython_format = self.genome_config.detected_format.to_biopython()
                 self.sequences = list(SeqIO.parse(handle, biopython_format))
 
-            # Validate we got sequences
+            # Validate sequences
             if not self.sequences:
                 error_msg = f"No sequences found in {self.genome_config.detected_format} file"
                 self.logger.add_validation_issue(
@@ -233,10 +240,10 @@ class GenomeValidator:
                 )
                 raise GenomeValidationError(error_msg)
 
-            self.logger.debug(f"Parsed {len(self.sequences)} sequence(s)")
-
-            # Validate sequences
-            self._validate_sequences()
+            if self.settings.validation_level == 'trust':
+                self.logger.info(f"Trust mode - parsed {len(self.sequences)} sequence(s), will validate first only")
+            else:
+                self.logger.debug(f"Parsed {len(self.sequences)} sequence(s)")
 
         except FileFormatError:
             raise
@@ -265,9 +272,52 @@ class GenomeValidator:
             raise exception_class(error_msg) from e
     
     def _validate_sequences(self) -> None:
-        """Validate parsed sequences."""
+        """
+        Validate parsed sequences.
+
+        Behavior depends on validation_level:
+        - 'strict': Validate all sequences
+        - 'trust': Validate only first sequence
+        - 'minimal': Skip validation (no parsing done)
+        """
         self.logger.debug("Validating sequences...")
-        
+
+        # Minimal mode - no sequences to validate
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - skipping sequence validation")
+            return
+
+        # Trust mode - validate only first sequence
+        if self.settings.validation_level == 'trust':
+            self.logger.debug("Trust mode - validating first sequence only")
+            if len(self.sequences) > 0:
+                record = self.sequences[0]
+                # Check sequence ID
+                if not record.id and not self.settings.allow_empty_id:
+                    error_msg = f"First sequence has no ID"
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='genome',
+                        message=error_msg,
+                        details={'sequence_index': 0, 'sequence_id': str(record.id)}
+                    )
+                    raise GenomeValidationError(error_msg)
+
+                # Check sequence length
+                if len(record.seq) == 0 and not self.settings.allow_empty_sequences:
+                    error_msg = f"First sequence '{record.id}' has zero length"
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='genome',
+                        message=error_msg,
+                        details={'sequence_id': record.id, 'index': 0}
+                    )
+                    raise GenomeValidationError(error_msg)
+
+                self.logger.debug(f"✓ First sequence validated: {record.id} ({len(record.seq)} bp)")
+            return
+
+        # Strict mode - full validation
         # Warn about number of sequences
         if len(self.sequences) >= self.settings.warn_n_sequences:
             self.logger.add_validation_issue(
@@ -291,7 +341,7 @@ class GenomeValidator:
                     details={'sequence_index': idx, 'sequence_id': str(record.id)}
                 )
                 raise GenomeValidationError(error_msg)
-            
+
             # Check sequence length
             if len(record.seq) == 0 and not self.settings.allow_empty_sequences:
                 error_msg = f"Sequence '{record.id}' has zero length"
@@ -302,8 +352,7 @@ class GenomeValidator:
                     details={'sequence_id': record.id, 'index': idx}
                 )
                 raise GenomeValidationError(error_msg)
-            
-        
+
         self.logger.debug("✓ Sequence validation passed")
     
     def _apply_edits(self) -> None:
@@ -314,8 +363,18 @@ class GenomeValidator:
         - Remove short sequences (min_sequence_length)
         - Add sequence prefix (replace_id_with)
         - Check for duplicate IDs (check_duplicate_ids)
+
+        Behavior depends on validation_level:
+        - 'strict': Apply all edits
+        - 'trust': Apply all edits (all sequences loaded)
+        - 'minimal': Skip edits (file will be copied as-is)
         """
         self.logger.debug("Applying editing specifications from settings...")
+
+        # Minimal mode - skip edits, file will be copied as-is
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - skipping edits")
+            return
 
         # 1. Remove short sequences
         if self.settings.min_sequence_length > 0:
@@ -332,7 +391,13 @@ class GenomeValidator:
                     details={'min_length': min_length, 'removed_count': removed}
                 )
 
+            # If all sequences were filtered out, return early
+            if len(self.sequences) == 0:
+                self.logger.debug("All sequences filtered out")
+                return
+
         # 2. Add sequence prefix
+        #   TODO: before or after plasmid handling? - what is plasmid file correspond to ref genome, where the id is changes??
         if self.settings.replace_id_with:
             prefix = self.settings.replace_id_with
             for record in self.sequences:
@@ -342,15 +407,17 @@ class GenomeValidator:
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
         # 3. Handle plasmid sequences
+        # select main sequence
         if self.settings.is_plasmid:
             # Treat all sequences as plasmids (no main chromosome)
-            self._handle_plasmid_file()
-        elif self.settings.plasmid_split and len(self.sequences) > 1:
-            # Normal mode: split plasmids from main chromosome
-            self._split_plasmids()
-        elif self.settings.plasmids_to_one and len(self.sequences) > 1:
-            # Normal mode: merge plasmids into one file, keep main chromosome
-            self._merge_plasmids()
+            self._handle_plasmids(self.sequences)
+            self.sequences = []
+        elif self.settings.plasmid_split or self.settings.plasmids_to_one:
+            # Only select main sequence if we're actually doing plasmid handling
+            self.main_sequence,plasmid_sequences = self._select_main_sequence(self.sequences)
+            self._handle_plasmids(plasmid_sequences)
+            self.sequences = [self.main_sequence]
+        # else: keep all sequences in main output file (default behavior)
 
         self.logger.debug(f"✓ Edits applied, {len(self.sequences)} sequence(s) remaining")
 
@@ -384,106 +451,38 @@ class GenomeValidator:
 
         return main_sequence, plasmid_sequences
 
-    def _handle_plasmid_file(self) -> None:
-        """
-        Handle plasmid file where all sequences are plasmids (no main chromosome).
-
-        Based on settings:
-        - If plasmid_split=True: Save each sequence to separate file
-        - If plasmids_to_one=True: Save all sequences to one merged file
-        - If both False: Keep all sequences in main output (do nothing)
-        """
-        if len(self.sequences) == 0:
+    def _handle_plasmids(self, plasmid_sequences:List[SeqRecord]):
+        if len(plasmid_sequences) == 0:
             return
 
-        self.logger.debug(f"Handling plasmid file with {len(self.sequences)} sequence(s)...")
+        self.logger.debug(f"Handling plasmid file with {len(plasmid_sequences)} sequence(s)...")
 
         if self.settings.plasmid_split:
             # Save each plasmid to separate file
             self.logger.info(
-                f"Processing plasmid file: saving {len(self.sequences)} plasmid(s) "
+                f"Processing plasmid file: saving {len(plasmid_sequences)} plasmid(s) "
                 f"to separate files"
             )
-            for i, plasmid in enumerate(self.sequences):
+            for i, plasmid in enumerate(plasmid_sequences):
                 # Save each plasmid individually (pass as list to reuse existing method)
                 self._save_plasmid_file([plasmid], i)
-
-            # Clear main sequences since all are saved as plasmids
-            self.sequences = []
 
         elif self.settings.plasmids_to_one:
             # Save all plasmids to one merged file
             self.logger.info(
-                f"Processing plasmid file: merging {len(self.sequences)} plasmid(s) "
+                f"Processing plasmid file: merging {len(plasmid_sequences)} plasmid(s) "
                 f"into one file"
             )
-            self._save_merged_plasmid_file(self.sequences)
-
-            # Clear main sequences since all are saved as plasmids
-            self.sequences = []
+            self._save_plasmid_file(plasmid_sequences,"")
 
         else:
             # Keep all sequences in main output file
             self.logger.info(
-                f"Processing plasmid file: keeping all {len(self.sequences)} "
+                f"Processing plasmid file: keeping all {len(plasmid_sequences)} "
                 f"sequence(s) in main output file"
             )
-            # No action needed - sequences stay in self.sequences
 
-    def _split_plasmids(self) -> None:
-        """
-        Split plasmid sequences into separate files.
-
-        When more than 1 sequence is present:
-        - Select main sequence based on main_longest or main_first setting
-        - Save remaining sequences (plasmids) to separate files with "_plasmid" suffix
-        - Uses same output settings (compression, subdirectory) as main file
-        """
-        self.logger.debug(f"Splitting plasmids from {len(self.sequences)} sequences...")
-
-        # Select main sequence based on settings
-        main_sequence, plasmid_sequences = self._select_main_sequence(self.sequences)
-
-        self.logger.info(
-            f"Splitting genome: keeping sequence '{main_sequence.id}' "
-            f"({len(main_sequence.seq)} bp) as main, "
-            f"saving {len(plasmid_sequences)} sequence(s) as plasmids"
-        )
-
-        for i, plasmid in enumerate(plasmid_sequences):
-            # Save each plasmid to separate file (pass as single-item list)
-            self._save_plasmid_file([plasmid], i)
-
-        # Update main sequences to only include chromosome
-        self.sequences = [main_sequence]
-
-    def _merge_plasmids(self) -> None:
-        """
-        Merge all plasmid sequences into a single file.
-
-        When more than 1 sequence is present:
-        - Select main sequence based on main_longest or main_first setting
-        - Save ALL remaining sequences (plasmids) to a single file with "_plasmid" suffix
-        - Uses same output settings (compression, subdirectory) as main file
-        """
-        self.logger.debug(f"Merging plasmids from {len(self.sequences)} sequences...")
-
-        # Select main sequence based on settings
-        main_sequence, plasmid_sequences = self._select_main_sequence(self.sequences)
-
-        self.logger.info(
-            f"Merging genome: keeping sequence '{main_sequence.id}' "
-            f"({len(main_sequence.seq)} bp) as main, "
-            f"merging {len(plasmid_sequences)} sequence(s) into one plasmid file"
-        )
-
-        # Save all plasmid sequences to a single merged file
-        self._save_merged_plasmid_file(plasmid_sequences)
-
-        # Update main sequences to only include chromosome
-        self.sequences = [main_sequence]
-
-    def _save_plasmid_file(self, plasmid_sequences: List[SeqRecord], index: int) -> None:
+    def _save_plasmid_file(self, plasmid_sequences: List[SeqRecord], index: str) -> None:
         """
         Save plasmid sequences to a separate file.
 
@@ -493,7 +492,7 @@ class GenomeValidator:
         """
         # Determine output directory (with optional subdirectory)
         output_dir = self.output_dir
-        if self.settings.output_subdir_name:
+        if self.settings.output_subdir_name and self.settings.output_subdir_name != "plasmid":
             output_dir = output_dir / self.settings.output_subdir_name
 
         # Create output directory
@@ -540,93 +539,6 @@ class GenomeValidator:
         for seq in plasmid_sequences:
             self.logger.debug(f"  Plasmid: {seq.id} ({len(seq.seq)} bp)")
 
-    def _save_merged_plasmid_file(self, plasmid_sequences: List[SeqRecord]) -> None:
-        """
-        Save all plasmid sequences to a single merged file.
-
-        Args:
-            plasmid_sequences: List of SeqRecord objects for plasmids to merge
-        """
-        # Determine output directory (with optional subdirectory)
-        output_dir = self.output_dir
-        if self.settings.output_subdir_name:
-            output_dir = output_dir / self.settings.output_subdir_name
-
-        # Create output directory
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate merged plasmid filename (no index number)
-        base_name = self.genome_config.filename
-        # Remove all suffixes
-        for suffix in self.input_path.suffixes:
-            base_name = base_name.replace(suffix, '')
-
-        # Add plasmid suffix and optional user suffix
-        if self.settings.output_filename_suffix:
-            plasmid_filename = f"{base_name}_{self.settings.output_filename_suffix}_plasmid.fasta"
-        else:
-            plasmid_filename = f"{base_name}_plasmid.fasta"
-
-        # Add compression extension if requested
-        coding = self.settings.coding_type
-
-        if coding in ('gz', 'gzip', CT.GZIP):
-            plasmid_filename += '.gz'
-        elif coding in ('bz2', 'bzip2', CT.BZIP2):
-            plasmid_filename += '.bz2'
-
-        plasmid_path = output_dir / plasmid_filename
-
-        # Write all plasmid sequences to single file with appropriate compression
-        self.logger.debug(f"Writing merged plasmid sequences to: {plasmid_path}")
-
-        if coding in ('gz', 'gzip', CT.GZIP):
-            with gzip.open(plasmid_path, 'wt') as handle:
-                SeqIO.write(plasmid_sequences, handle, 'fasta')
-        elif coding in ('bz2', 'bzip2', CT.BZIP2):
-            with bz2.open(plasmid_path, 'wt') as handle:
-                SeqIO.write(plasmid_sequences, handle, 'fasta')
-        else:
-            with open(plasmid_path, 'w') as handle:
-                SeqIO.write(plasmid_sequences, handle, 'fasta')
-
-        self.logger.info(f"Merged plasmid file saved: {plasmid_path} ({len(plasmid_sequences)} sequences)")
-
-        # Log details about each plasmid in the merged file
-        for seq in plasmid_sequences:
-            self.logger.debug(f"  Plasmid: {seq.id} ({len(seq.seq)} bp)")
-
-    def _collect_statistics(self) -> None:
-        """Collect statistics about the sequences and validate against thresholds."""
-        self.logger.debug("Collecting statistics...")
-
-        if not self.sequences:
-            return
-
-        lengths = [len(record.seq) for record in self.sequences]
-
-        self.statistics = {
-            'num_sequences': len(self.sequences),
-            'total_length': sum(lengths),
-            'min_length': min(lengths),
-            'max_length': max(lengths),
-            'avg_length': sum(lengths) / len(lengths)
-        }
-
-        # Calculate GC content
-        total_gc = 0
-        total_bases = 0
-
-        for record in self.sequences:
-            seq_str = str(record.seq).upper()
-            total_gc += seq_str.count('G') + seq_str.count('C')
-            total_bases += len(seq_str)
-
-        if total_bases > 0:
-            self.statistics['gc_content'] = (total_gc / total_bases) * 100
-
-        self.logger.debug(f"Statistics: {self.statistics}")
-    
     def _convert_to_fasta(self) -> None:
         """Convert sequences to FASTA format (if not already)."""
         # Check if already FASTA using enum comparison
@@ -647,6 +559,11 @@ class GenomeValidator:
         """
         Save processed genome to output directory using settings.
 
+        Behavior depends on validation_level:
+        - 'strict': Write sequences using BioPython (may convert to FASTA)
+        - 'trust': Write sequences using BioPython (all sequences with edits applied)
+        - 'minimal': Copy file as-is (preserve original format)
+
         Note: Compression handling will be moved to utils/file_handler.py in future.
 
         Returns:
@@ -662,6 +579,31 @@ class GenomeValidator:
         # Create output directory
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Minimal mode - copy file as-is without parsing
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - copying file as-is")
+
+            # Keep original filename and format
+            output_filename = self.genome_config.filename
+            if self.settings.output_filename_suffix:
+                # Insert suffix before extensions
+                base_name = self.genome_config.filename
+                for suffix in self.input_path.suffixes:
+                    base_name = base_name.replace(suffix, '')
+                # Reconstruct with suffix and original extensions
+                extensions = ''.join(self.input_path.suffixes)
+                output_filename = f"{base_name}_{self.settings.output_filename_suffix}{extensions}"
+
+            output_path = output_dir / output_filename
+
+            # Copy file
+            self.logger.debug(f"Copying {self.input_path} to {output_path}")
+            shutil.copy2(self.input_path, output_path)
+
+            self.logger.info(f"Output saved: {output_path}")
+            return output_path
+
+        # Strict and Trust modes - write sequences using BioPython
         # Generate output filename from original filename (without compression extension)
         # Get base name without any extensions
         base_name = self.genome_config.filename
@@ -702,12 +644,3 @@ class GenomeValidator:
         self.logger.info(f"Output saved: {output_path}")
 
         return output_path
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """
-        Get statistics about the processed genome.
-        
-        Returns:
-            Dictionary of statistics
-        """
-        return self.statistics.copy()

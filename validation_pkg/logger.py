@@ -121,21 +121,6 @@ class ValidationLogger:
             log_file = Path(log_file)
             log_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Configure file logger using stdlib
-            file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-            file_handler.setLevel(logging.DEBUG)
-            file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-            file_handler.setFormatter(file_formatter)
-
-            # Setup stdlib logger for file output
-            stdlib_logger = logging.getLogger("bioinformatics_validator")
-            stdlib_logger.addHandler(file_handler)
-            stdlib_logger.setLevel(logging.DEBUG)
-            stdlib_logger.propagate = False
-
             # Use stdlib logging with structlog
             processors = [
                 structlog.contextvars.merge_contextvars,
@@ -155,6 +140,23 @@ class ValidationLogger:
                 logger_factory=structlog.stdlib.LoggerFactory(),
                 cache_logger_on_first_use=False,
             )
+
+            # Setup stdlib logger for file and console output
+            stdlib_logger = logging.getLogger("bioinformatics_validator")
+            stdlib_logger.handlers.clear()  # Clear any existing handlers
+            stdlib_logger.setLevel(logging.DEBUG)
+            stdlib_logger.propagate = False
+
+            # Configure file handler with ProcessorFormatter for structured logs
+            file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(
+                structlog.stdlib.ProcessorFormatter(
+                    processor=structlog.processors.JSONRenderer(),
+                    foreign_pre_chain=processors,
+                )
+            )
+            stdlib_logger.addHandler(file_handler)
 
             # Configure the ProcessorFormatter for console with colors
             console_handler = logging.StreamHandler(sys.stdout)

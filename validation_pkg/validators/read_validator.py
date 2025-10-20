@@ -45,6 +45,10 @@ class ReadValidator:
         Settings for read validation and processing.
 
         Attributes:
+            validation_level: Validation thoroughness level:
+                - 'strict': Full decompression, parsing, and validation of all sequences (default)
+                - 'trust': Fast validation - check line count and first record only
+                - 'minimal': Only verify file exists and has correct extension
             check_invalid_chars: If True, validates that sequences contain only valid nucleotides (ATCGN)
             allow_empty_id: If True, allows sequences without IDs
             allow_duplicate_ids: If True, allows duplicate sequence IDs across the file
@@ -58,20 +62,29 @@ class ReadValidator:
             When outdir_by_ngs_type=True, output_subdir_name will be automatically set to the
             read's ngs_type (illumina/ont/pacbio), overriding any manually set value.
 
+        Trust Mode Behavior:
+            - validation_level='strict': Full validation (current behavior)
+            - validation_level='trust': FASTQ - check line count % 4 == 0 and first record format
+                                        BAM - verify header and first record only
+            - validation_level='minimal': Only file existence and extension check
+
         Example:
             >>> settings = ReadValidator.Settings()
             >>> print(settings)  # View all settings
             >>> ref_settings = settings.update(sequence_prefix="chr1", output_filename_suffix="ref")
             >>> validator = ReadValidator(read_config, output_dir, ref_settings)
         """
-        #   TODO nerozbalovat, zkontrolovat povrchne - release/debug mode
-        # Validation thresholds
+        # Trust mode settings
+        validation_level: str = 'strict'  # 'strict', 'trust', or 'minimal'
+
+        # Validation thresholds (only used in strict mode)
         check_invalid_chars: bool = False # TODO: remove
         allow_empty_id: bool = False    # TODO: remove
         allow_duplicate_ids: bool = True    # TODO: remove
 
         # Editing specifications
         keep_bam: bool = True   # TODO: Keep it, but wont be used - deprecated by ERROR, that we do not support BAM
+        ignore_bam: bool = True
 
         # Output format
         coding_type: Optional[str] = None
@@ -100,6 +113,14 @@ class ReadValidator:
         self.output_dir = Path(output_dir)
         self.settings = settings if settings is not None else self.Settings()
 
+        # Validate validation_level setting
+        valid_levels = {'strict', 'trust', 'minimal'}
+        if self.settings.validation_level not in valid_levels:
+            raise ValueError(
+                f"Invalid validation_level '{self.settings.validation_level}'. "
+                f"Must be one of: {', '.join(valid_levels)}"
+            )
+
         # Apply outdir_by_ngs_type if enabled
         if self.settings.outdir_by_ngs_type:
             # Override output_subdir_name with ngs_type
@@ -114,6 +135,9 @@ class ReadValidator:
 
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
+
+        # Cache for trust mode
+        self._trust_line_count = None  # Cache line count to avoid redundant calls
 
         # Statistics
         self.statistics = {
@@ -147,6 +171,10 @@ class ReadValidator:
 
             # Special workflow for BAM files
             if self.read_config.detected_format == ReadFormat.BAM:
+                if self.settings.ignore_bam:
+                    self.logger.warning(f"Cannot proccess BAM files, the file will be ignored")
+                    return
+
                 # Step 1: Copy original BAM to output (if keep_bam is enabled)
                 if self.settings.keep_bam:
                     self._copy_bam_to_output()
@@ -217,16 +245,240 @@ class ReadValidator:
                 details={'file': str(self.input_path)}
             )
             raise
+
+    def _count_lines_fast(self) -> int:
+        """
+        Fast line counting using zcat/bzcat for compressed files.
+
+        Uses shell commands for efficient line counting without loading file into memory:
+        - gzip (.gz): zcat file.gz | wc -l
+        - bzip2 (.bz2): bzcat file.bz2 | wc -l
+        - uncompressed: wc -l file
+
+        Note: wc -l counts newline characters, not lines. If a file doesn't end with
+        a newline, we need to add 1 to the count. We check if the last byte is a newline.
+
+        Returns:
+            Number of lines in the file
+
+        Raises:
+            ReadValidationError: If line counting fails
+        """
+        import subprocess
+        from validation_pkg.utils.formats import CodingType
+
+        try:
+            # Count newline characters
+            if self.read_config.coding_type == CodingType.GZIP:
+                # Use zcat for gzip files
+                result = subprocess.run(
+                    ['sh', '-c', f'zcat "{self.input_path}" | wc -l'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes timeout
+                )
+            elif self.read_config.coding_type == CodingType.BZIP2:
+                # Use bzcat for bzip2 files
+                result = subprocess.run(
+                    ['sh', '-c', f'bzcat "{self.input_path}" | wc -l'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes timeout
+                )
+            else:
+                # Use wc -l for uncompressed files
+                result = subprocess.run(
+                    ['wc', '-l', str(self.input_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+
+            if result.returncode != 0:
+                raise ReadValidationError(f"Line counting failed: {result.stderr}")
+
+            # Parse output - wc -l returns "count filename" or just "count"
+            line_count = int(result.stdout.strip().split()[0])
+
+            # Check if file ends with newline - wc -l counts newline chars, not lines
+            # If file doesn't end with newline, we need to add 1
+            if self.read_config.coding_type == CodingType.GZIP:
+                # Check last byte of decompressed content
+                last_byte_result = subprocess.run(
+                    ['sh', '-c', f'zcat "{self.input_path}" | tail -c 1'],
+                    capture_output=True,
+                    timeout=30
+                )
+                if last_byte_result.returncode == 0 and last_byte_result.stdout and last_byte_result.stdout[-1:] != b'\n':
+                    line_count += 1
+            elif self.read_config.coding_type == CodingType.BZIP2:
+                # Check last byte of decompressed content
+                last_byte_result = subprocess.run(
+                    ['sh', '-c', f'bzcat "{self.input_path}" | tail -c 1'],
+                    capture_output=True,
+                    timeout=30
+                )
+                if last_byte_result.returncode == 0 and last_byte_result.stdout and last_byte_result.stdout[-1:] != b'\n':
+                    line_count += 1
+            else:
+                # Check last byte of uncompressed file
+                if self.input_path.stat().st_size > 0:
+                    with open(self.input_path, 'rb') as f:
+                        f.seek(-1, 2)  # Seek to last byte
+                        last_byte = f.read(1)
+                        if last_byte != b'\n':
+                            line_count += 1
+
+            return line_count
+
+        except subprocess.TimeoutExpired:
+            raise ReadValidationError("Line counting timed out - file too large")
+        except (ValueError, IndexError) as e:
+            raise ReadValidationError(f"Failed to parse line count: {e}")
+        except Exception as e:
+            raise ReadValidationError(f"Line counting failed: {e}")
+
+    def _validate_first_fastq_record(self) -> Optional[SeqRecord]:
+        """
+        Validate only the first FASTQ record for format correctness.
+
+        Checks:
+        1. Line 1 starts with '@' (sequence ID)
+        2. Line 2 contains sequence
+        3. Line 3 starts with '+' (separator)
+        4. Line 4 contains quality scores
+
+        Returns:
+            First SeqRecord if valid, None if validation fails
+
+        Raises:
+            FastqFormatError: If first record is not in valid FASTQ format
+        """
+        self.logger.debug("Validating first FASTQ record...")
+
+        try:
+            handle = self._open_file()
+            try:
+                # Read first 4 lines
+                lines = []
+                for i in range(4):
+                    line = handle.readline()
+                    if not line:
+                        raise FastqFormatError(
+                            f"File has fewer than 4 lines - not a valid FASTQ file"
+                        )
+                    lines.append(line.rstrip('\n\r'))
+
+                # Validate FASTQ format
+                if not lines[0].startswith('@'):
+                    raise FastqFormatError(
+                        f"First line must start with '@', found: {lines[0][:50]}"
+                    )
+
+                if not lines[2].startswith('+'):
+                    raise FastqFormatError(
+                        f"Third line must start with '+', found: {lines[2][:50]}"
+                    )
+
+                # Check that sequence and quality have same length
+                seq_len = len(lines[1])
+                qual_len = len(lines[3])
+                if seq_len != qual_len:
+                    raise FastqFormatError(
+                        f"Sequence length ({seq_len}) doesn't match quality length ({qual_len})"
+                    )
+
+                # Parse first record using BioPython to ensure it's valid
+                from io import StringIO
+                first_record_text = '\n'.join(lines)
+                record = next(SeqIO.parse(StringIO(first_record_text), 'fastq'))
+
+                self.logger.debug(f"✓ First record validated: {record.id}, length={len(record.seq)}")
+                return record
+
+            finally:
+                handle.close()
+
+        except FastqFormatError:
+            raise
+        except Exception as e:
+            error_msg = f"Failed to validate first FASTQ record: {e}"
+            self.logger.add_validation_issue(
+                level='ERROR',
+                category='read',
+                message=error_msg,
+                details={'file': self.read_config.filename, 'error': str(e)}
+            )
+            raise FastqFormatError(error_msg) from e
     
     def _parse_file(self) -> None:
         """
         Parse FASTQ file using BioPython and validate format from read_config.
 
+        Behavior depends on validation_level:
+        - 'strict': Full parsing and validation of all sequences
+        - 'trust': Only validate first record and check line count
+        - 'minimal': No parsing or validation
+
         Note: BAM files are handled separately in the validate() method.
         This method only processes FASTQ files.
         """
-        self.logger.debug(f"Parsing {self.read_config.detected_format} file...")
+        self.logger.debug(f"Parsing {self.read_config.detected_format} file (validation_level={self.settings.validation_level})...")
 
+        # Minimal mode - skip all parsing and validation
+        if self.settings.validation_level == 'minimal':
+            self.logger.info("Minimal validation mode - skipping file parsing")
+            # Set empty sequences list - file will be copied as-is in _save_output
+            self.sequences = []
+            return
+
+        # Trust mode - fast validation without full parsing
+        if self.settings.validation_level == 'trust':
+            self.logger.info("Trust mode - performing fast validation")
+            try:
+                # Step 1: Check line count is divisible by 4 (fast check first)
+                line_count = self._count_lines_fast()
+                self._trust_line_count = line_count  # Cache for statistics
+                self.logger.debug(f"Line count: {line_count:,}")
+
+                if line_count % 4 != 0:
+                    error_msg = (
+                        f"FASTQ file has {line_count:,} lines, which is not divisible by 4. "
+                        f"Valid FASTQ files must have exactly 4 lines per record."
+                    )
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='read',
+                        message=error_msg,
+                        details={'file': self.read_config.filename, 'line_count': line_count}
+                    )
+                    raise FastqFormatError(error_msg)
+
+                # Step 2: Validate first record format (only if line count is correct)
+                first_record = self._validate_first_fastq_record()
+
+                # Estimate number of sequences
+                num_sequences = line_count // 4
+                self.logger.info(f"✓ Trust mode validation passed - estimated {num_sequences:,} sequences")
+
+                # Store only the first record for statistics estimation
+                # Full file will be copied in _save_output
+                self.sequences = [first_record] if first_record else []
+                return
+
+            except FileFormatError:
+                raise
+            except Exception as e:
+                error_msg = f"Trust mode validation failed: {e}"
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='read',
+                    message=error_msg,
+                    details={'file': self.read_config.filename, 'error': str(e)}
+                )
+                raise FastqFormatError(error_msg) from e
+
+        # Strict mode - full parsing and validation (original behavior)
         try:
             # Open file with automatic decompression
             handle = self._open_file()
@@ -352,6 +604,11 @@ class ReadValidator:
         """
         Collect statistics about the sequences.
 
+        Behavior depends on validation_level:
+        - 'strict': Full statistics from all sequences
+        - 'trust': Estimated statistics based on first record and line count
+        - 'minimal': No statistics collected
+
         For read files, collects:
         - Number of reads
         - Total bases
@@ -361,6 +618,85 @@ class ReadValidator:
         """
         self.logger.debug("Collecting statistics...")
 
+        # Minimal mode - no statistics
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - no statistics collected")
+            self.statistics = {
+                'num_sequences': 0,
+                'total_length': 0,
+                'gc_content': 0.0,
+                'min_length': 0,
+                'max_length': 0,
+                'avg_length': 0.0,
+                'validation_level': 'minimal'
+            }
+            return
+
+        # Trust mode - estimate statistics from first record and line count
+        if self.settings.validation_level == 'trust':
+            self.logger.debug("Trust mode - estimating statistics from first record")
+
+            if not self.sequences:
+                self.logger.debug("No sequences for statistics estimation")
+                self.statistics = {
+                    'num_sequences': 0,
+                    'total_length': 0,
+                    'gc_content': 0.0,
+                    'min_length': 0,
+                    'max_length': 0,
+                    'avg_length': 0.0,
+                    'validation_level': 'trust',
+                    'estimated': True
+                }
+                return
+
+            # Get first record for estimation
+            first_record = self.sequences[0]
+            first_seq_len = len(first_record.seq)
+
+            # Estimate total sequences from line count (use cached value if available)
+            try:
+                if self._trust_line_count is not None:
+                    line_count = self._trust_line_count
+                else:
+                    line_count = self._count_lines_fast()
+                estimated_num_sequences = line_count // 4
+            except:
+                # If line count fails, can't estimate
+                estimated_num_sequences = 1
+
+            # Estimate GC content from first record
+            seq_str = str(first_record.seq).upper()
+            gc_count = seq_str.count('G') + seq_str.count('C')
+            gc_content = (gc_count / len(seq_str) * 100) if len(seq_str) > 0 else 0.0
+
+            # Quality scores from first record
+            quality_stats = {}
+            if hasattr(first_record, 'letter_annotations') and 'phred_quality' in first_record.letter_annotations:
+                qualities = first_record.letter_annotations['phred_quality']
+                if qualities:
+                    quality_stats = {
+                        'mean_quality': round(sum(qualities) / len(qualities), 2),
+                        'min_quality': min(qualities),
+                        'max_quality': max(qualities)
+                    }
+
+            self.statistics = {
+                'num_sequences': estimated_num_sequences,
+                'total_length': estimated_num_sequences * first_seq_len,
+                'gc_content': round(gc_content, 2),
+                'min_length': first_seq_len,  # Estimated based on first record
+                'max_length': first_seq_len,  # Estimated based on first record
+                'avg_length': first_seq_len,  # Estimated based on first record
+                'validation_level': 'trust',
+                'estimated': True,
+                **quality_stats
+            }
+
+            self.logger.debug(f"Estimated statistics: {self.statistics}")
+            return
+
+        # Strict mode - full statistics (original behavior)
         if not self.sequences:
             self.logger.debug("No sequences to collect statistics from")
             return
@@ -408,6 +744,7 @@ class ReadValidator:
             'min_length': min_length,
             'max_length': max_length,
             'avg_length': round(avg_length, 2),
+            'validation_level': 'strict',
             **quality_stats
         }
 
@@ -417,6 +754,11 @@ class ReadValidator:
         """
         Convert BAM file to FASTQ format using pysam or samtools.
 
+        Behavior depends on validation_level:
+        - 'strict': Full conversion of all reads
+        - 'trust': Only validate BAM header and first few reads
+        - 'minimal': Skip conversion entirely
+
         This method tries to use pysam first, and falls back to samtools
         command-line tool if pysam is not available.
 
@@ -425,6 +767,81 @@ class ReadValidator:
         """
         import subprocess
 
+        # Minimal mode - skip conversion
+        if self.settings.validation_level == 'minimal':
+            self.logger.info("Minimal validation mode - skipping BAM conversion")
+            self.sequences = []
+            return
+
+        # Trust mode - validate header and first few reads only
+        if self.settings.validation_level == 'trust':
+            self.logger.info("Trust mode - validating BAM header and first records only")
+            try:
+                import pysam  # type: ignore
+
+                with pysam.AlignmentFile(str(self.input_path), "rb") as bam_file:
+                    # Validate BAM header exists
+                    if not bam_file.header:
+                        raise BamFormatError("BAM file has no header")
+
+                    self.logger.debug(f"✓ BAM header validated: {len(bam_file.header.get('SQ', []))} sequences in reference")
+
+                    # Read and validate first few records (up to 10)
+                    first_records = []
+                    for i, read in enumerate(bam_file):
+                        if i >= 10:
+                            break
+
+                        # Skip unmapped or secondary/supplementary alignments
+                        if read.is_unmapped or read.is_secondary or read.is_supplementary:
+                            continue
+
+                        # Create SeqRecord from BAM read
+                        seq = Seq(read.query_sequence if read.query_sequence else "")
+                        qualities = read.query_qualities if read.query_qualities else []
+
+                        record = SeqRecord(
+                            seq,
+                            id=read.query_name,
+                            description="",
+                            letter_annotations={"phred_quality": list(qualities)} if qualities else {}
+                        )
+                        first_records.append(record)
+
+                    if not first_records:
+                        raise BamFormatError("No valid reads found in BAM file")
+
+                    self.logger.info(f"✓ Trust mode BAM validation passed - validated {len(first_records)} records")
+                    self.sequences = first_records
+                    return
+
+            except ImportError:
+                # If pysam not available, try samtools for header validation
+                try:
+                    result = subprocess.run(
+                        ["samtools", "view", "-H", str(self.input_path)],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+
+                    if result.returncode != 0:
+                        raise BamFormatError(f"Failed to read BAM header: {result.stderr}")
+
+                    if not result.stdout.strip():
+                        raise BamFormatError("BAM file has no header")
+
+                    self.logger.info("✓ Trust mode BAM validation passed (header only, pysam not available)")
+                    self.sequences = []
+                    return
+
+                except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                    raise ReadValidationError(
+                        "Trust mode BAM validation requires either 'pysam' or 'samtools'. "
+                        "Please install one of them."
+                    ) from e
+
+        # Strict mode - full conversion (original behavior)
         # Try using pysam first (optional dependency)
         try:
             import pysam  # type: ignore
@@ -574,6 +991,10 @@ class ReadValidator:
         """
         Save processed read to output directory using settings.
 
+        Behavior depends on validation_level:
+        - 'strict': Write sequences using BioPython
+        - 'trust' or 'minimal': Copy file as-is (preserve original format)
+
         Note: Compression handling will be moved to utils/file_handler.py in future.
 
         Returns:
@@ -589,6 +1010,31 @@ class ReadValidator:
         # Create output directory
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Trust or minimal mode - copy file as-is without parsing
+        if self.settings.validation_level in ['trust', 'minimal']:
+            self.logger.debug(f"{self.settings.validation_level.capitalize()} mode - copying file as-is")
+
+            # Keep original filename and compression
+            output_filename = self.read_config.filename
+            if self.settings.output_filename_suffix:
+                # Insert suffix before extensions
+                base_name = self.read_config.filename
+                for suffix in self.input_path.suffixes:
+                    base_name = base_name.replace(suffix, '')
+                # Reconstruct with suffix and original extensions
+                extensions = ''.join(self.input_path.suffixes)
+                output_filename = f"{base_name}_{self.settings.output_filename_suffix}{extensions}"
+
+            output_path = output_dir / output_filename
+
+            # Copy file
+            self.logger.debug(f"Copying {self.input_path} to {output_path}")
+            shutil.copy2(self.input_path, output_path)
+
+            self.logger.info(f"Output saved: {output_path}")
+            return output_path
+
+        # Strict mode - write sequences using BioPython (original behavior)
         # Generate output filename from original filename (without compression extension)
         # Get base name without any extensions
         base_name = self.read_config.filename

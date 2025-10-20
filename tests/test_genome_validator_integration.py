@@ -62,11 +62,6 @@ class TestGenomeValidatorIntegration:
             # Actual length is 176 (44*4 lines without newlines)
             assert len(records[0].seq) == 176
 
-        # Check statistics
-        stats = validator.get_statistics()
-        assert stats['num_sequences'] == 1
-        assert stats['total_length'] == 176
-
     def test_case_02_multi_sequence_plasmid_split(self, fixtures_dir, output_dir):
         """Test Case 2: FASTA with multiple sequences (chromosome + plasmids)."""
         test_case = fixtures_dir / "test_case_02_multi_sequence"
@@ -229,29 +224,6 @@ class TestGenomeValidatorIntegration:
             assert "very_short" not in ids
             assert "short_seq" not in ids
 
-    def test_case_07_gc_content_calculation(self, fixtures_dir, output_dir):
-        """Test Case 7: High GC content genome statistics."""
-        test_case = fixtures_dir / "test_case_07_high_gc"
-        genome_file = test_case / "genome.fasta"
-
-        genome_config = GenomeConfig(
-            filename=genome_file.name,
-            filepath=genome_file,
-            coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
-        )
-
-        settings = GenomeValidator.Settings(
-            min_sequence_length=0,
-            warn_n_sequences=10
-        )
-
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
-
-        # Check GC content is 100%
-        stats = validator.get_statistics()
-        assert stats['gc_content'] == 100.0
 
     def test_case_08_id_replacement(self, fixtures_dir, output_dir):
         """Test Case 8: Genome with ID replacement."""
