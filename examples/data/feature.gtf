@@ -1,0 +1,6 @@
+chr1	StringTie	transcript	1000	2000	.	+	.	gene_id "GENE001"; transcript_id "TRANS001";
+chr1	StringTie	exon	1000	1200	.	+	.	gene_id "GENE001"; transcript_id "TRANS001"; exon_number "1";
+chr1	StringTie	exon	1500	2000	.	+	.	gene_id "GENE001"; transcript_id "TRANS001"; exon_number "2";
+chr1	StringTie	transcript	3000	4000	.	-	.	gene_id "GENE002"; transcript_id "TRANS002";
+chr1	StringTie	exon	3000	3500	.	-	.	gene_id "GENE002"; transcript_id "TRANS002"; exon_number "1";
+chr1	StringTie	exon	3700	4000	.	-	.	gene_id "GENE002"; transcript_id "TRANS002"; exon_number "2";

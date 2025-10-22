@@ -1,0 +1,22 @@
+LOCUS       Plasmid_Example          200 bp    DNA     circular BCT 01-JAN-2025
+DEFINITION  Example plasmid in GenBank format.
+ACCESSION   PL000001
+VERSION     PL000001.1
+KEYWORDS    plasmid.
+SOURCE      Escherichia coli
+  ORGANISM  Escherichia coli
+            Bacteria; Proteobacteria; Gammaproteobacteria; Enterobacterales;
+            Enterobacteriaceae; Escherichia.
+FEATURES             Location/Qualifiers
+     source          1..200
+                     /organism="Escherichia coli"
+                     /mol_type="genomic DNA"
+                     /plasmid="pExample"
+     rep_origin      50..150
+                     /note="origin of replication"
+ORIGIN
+        1 atgcgtacgt agctagctag ctagctagct agctagctag ctagctagct agctagctag
+       61 ctagctagct agctagctag ctagctagct agctagctag ctagctagct agctagctag
+      121 ctagctagct agctagctag ctagctagct agctagctag ctagctagct agctagctag
+      181 ctagctagct agctagctag
+//

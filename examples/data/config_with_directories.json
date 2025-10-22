@@ -1,0 +1,21 @@
+{
+  "ref_genome_filename": {
+    "filename": "genome.fasta"
+  },
+  "reads": [
+    {
+      "directory": "illumina_reads/",
+      "ngs_type": "illumina",
+      "validation_level": "trust"
+    },
+    {
+      "directory": "ont_reads/",
+      "ngs_type": "ont",
+      "validation_level": "strict",
+      "check_invalid_chars": true
+    }
+  ],
+  "ref_feature_filename": {
+    "filename": "feature.gff"
+  }
+}

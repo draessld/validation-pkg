@@ -1,0 +1,27 @@
+{
+  "ref_genome_filename": {
+    "filename": "genome.fasta"
+  },
+  "mod_genome_filename": {
+    "filename": "genome.fa.gz"
+  },
+  "ref_plasmid_filename": {
+    "filename": "genome.gbk.bz2"
+  },
+  "reads": [
+    {
+      "filename": "read.fastq",
+      "ngs_type": "illumina"
+    },
+    {
+      "filename": "read.fq.gz",
+      "ngs_type": "ont"
+    }
+  ],
+  "ref_feature_filename": {
+    "filename": "feature.gff"
+  },
+  "mod_feature_filename": {
+    "filename": "feature.bed"
+  }
+}

@@ -1,0 +1,26 @@
+LOCUS       Example_Genome           300 bp    DNA     linear   BCT 01-JAN-2025
+DEFINITION  Example genome in GenBank format.
+ACCESSION   EX000001
+VERSION     EX000001.1
+KEYWORDS    .
+SOURCE      Escherichia coli
+  ORGANISM  Escherichia coli
+            Bacteria; Proteobacteria; Gammaproteobacteria; Enterobacterales;
+            Enterobacteriaceae; Escherichia.
+FEATURES             Location/Qualifiers
+     source          1..300
+                     /organism="Escherichia coli"
+                     /mol_type="genomic DNA"
+     gene            10..90
+                     /gene="exampleGene"
+     CDS             10..90
+                     /gene="exampleGene"
+                     /product="example protein"
+                     /translation="MLKIVTRAA"
+ORIGIN
+        1 atgcgtacgt agctagctag ctagctagct agctagctag ctagctagct agctagctag
+       61 ctagctagct agctagctag ctagctagct agctagctag ctagctagct agctagctag
+      121 ctagctagct agctagctag ctagctagct agctagctag ctagctagct agctagctag
+      181 ctagctagct agctagctag ctagctagct agctagctag ctagctagct agctagctag
+      241 ctagctagct agctagctag ctagctagct agctagctag ctagctagct agctagctag
+//

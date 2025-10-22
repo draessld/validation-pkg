@@ -1,0 +1,9 @@
+##gff-version 3
+chromosome1	RefSeq	gene	100	500	.	+	.	ID=gene001;Name=geneA;product=hypothetical protein
+chromosome1	RefSeq	CDS	100	500	.	+	0	ID=cds001;Parent=gene001;product=hypothetical protein
+chromosome1	RefSeq	gene	600	1200	.	-	.	ID=gene002;Name=geneB;product=DNA polymerase
+chromosome1	RefSeq	CDS	600	1200	.	-	0	ID=cds002;Parent=gene002;product=DNA polymerase
+chromosome1	RefSeq	gene	1500	2000	.	+	.	ID=gene003;Name=geneC;product=transporter protein
+chromosome1	RefSeq	CDS	1500	2000	.	+	0	ID=cds003;Parent=gene003;product=transporter protein
+plasmid1	RefSeq	gene	50	250	.	+	.	ID=gene004;Name=repA;product=replication protein
+plasmid1	RefSeq	CDS	50	250	.	+	0	ID=cds004;Parent=gene004;product=replication protein

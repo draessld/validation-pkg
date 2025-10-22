@@ -1,0 +1,7 @@
+##gff-version 3
+chr1	AUGUSTUS	gene	1000	2000	.	+	.	ID=g1;Name=gene1
+chr1	AUGUSTUS	mRNA	1000	2000	.	+	.	ID=t1;Parent=g1
+chr1	AUGUSTUS	exon	1000	1200	.	+	.	ID=e1;Parent=t1
+chr1	AUGUSTUS	CDS	1050	1200	.	+	0	ID=c1;Parent=t1
+chr1	AUGUSTUS	exon	1500	2000	.	+	.	ID=e2;Parent=t1
+chr1	AUGUSTUS	CDS	1500	1950	.	+	0	ID=c2;Parent=t1
