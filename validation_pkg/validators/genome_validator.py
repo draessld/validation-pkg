@@ -75,7 +75,6 @@ class GenomeValidator:
         warn_n_sequences: int = 2   #   Raise Warning - set plasmid_split to True
 
         # Editing specifications
-        #   TODO: plasmid handeling better
         is_plasmid: bool = False
         plasmid_split: bool = False
         plasmids_to_one: bool = False
@@ -397,7 +396,7 @@ class GenomeValidator:
 
         # 2. Add sequence prefix
         #   TODO: before or after plasmid handling? - what is plasmid file correspond to ref genome, where the id is changes??
-        #   TODO: plasmidy nepotrebuji stejny ID
+        #   TODO: plasmid does not require same ID
         #   TODO: _ref_plasmid mergnout s _ref_plasmid ze zvlastniho souboru.
         if self.settings.replace_id_with:
             prefix = self.settings.replace_id_with

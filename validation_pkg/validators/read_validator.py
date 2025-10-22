@@ -191,7 +191,6 @@ class ReadValidator:
 
                 # Validate sequences
                 self._validate_sequences()
-                #   TODO: always gzip output
                 
                 # Step 2: Apply editing specifications
                 self._apply_edits()

@@ -24,30 +24,27 @@ Features
 - BAM to FASTQ conversion
 - Detailed validation reports with structured error logging
 - Flexible configuration via JSON
-- Command-line interface
 
 Quick Start
 -----------
 
-**Using the API:**
+**Using the Functional API:**
 
->>> from validation_pkg import ValidationCoordinator
->>> coordinator = ValidationCoordinator("config.json")
->>> report = coordinator.validate_all()
->>> print(report.summary())
-
-**Using the CLI:**
-
-.. code-block:: bash
-
-    # Validate all files in config
-    python -m validation_pkg validate config.json
-
-    # Validate only genomes
-    python -m validation_pkg validate config.json --only genomes
-
-    # Enable verbose output
-    python -m validation_pkg validate config.json --verbose
+>>> from validation_pkg import ConfigManager, validate_genome, validate_read, validate_feature
+>>> config = ConfigManager.load("config.json")
+>>>
+>>> # Validate genome files
+>>> if config.ref_genome:
+...     validate_genome(config.ref_genome, config.output_dir)
+>>>
+>>> # Validate read files
+>>> if config.reads:
+...     for read in config.reads:
+...         validate_read(read, config.output_dir)
+>>>
+>>> # Validate feature files
+>>> if config.ref_feature:
+...     validate_feature(config.ref_feature, config.output_dir)
 
 Configuration Example
 --------------------
@@ -72,7 +69,6 @@ See docs/config_guide.md for detailed configuration options.
 Package Structure
 ----------------
 - validation_pkg.config_manager: Configuration loading and parsing
-- validation_pkg.coordinator: Workflow orchestration
 - validation_pkg.validators: Individual file validators
     - genome_validator: Genome file validation
     - read_validator: Read file validation
@@ -86,7 +82,6 @@ Workflow
 2. **Validate genomes:** Check reference and modified genome files
 3. **Validate features:** Validate feature annotations (optional)
 4. **Validate reads:** Process all sequencing read files
-5. **Generate report:** Create detailed validation report
 
 Error Handling
 -------------
@@ -114,7 +109,6 @@ __author__ = "Dominika Bohuslavova"
 __license__ = "MIT"
 
 # Public API exports
-from validation_pkg.coordinator import ValidationCoordinator, Coordinator, ValidationReport
 from validation_pkg.config_manager import ConfigManager, Config
 from validation_pkg.validators.genome_validator import GenomeValidator
 from validation_pkg.validators.read_validator import ReadValidator
@@ -258,10 +252,7 @@ validate_features = validate_feature
 
 
 __all__ = [
-    # Main classes
-    'ValidationCoordinator',
-    'Coordinator',  # Backward compatibility alias
-    'ValidationReport',
+    # Configuration
     'ConfigManager',
     'Config',
 
@@ -270,7 +261,7 @@ __all__ = [
     'ReadValidator',
     'FeatureValidator',
 
-    # Functional API
+    # Functional API (Primary Interface)
     'validate_genome',
     'validate_read',
     'validate_reads',
