@@ -1,3 +1,0 @@
-Config Test Case 8: Missing genome file
-- Config references ref_genome.fasta which doesn't exist
-- Expected: Should raise FileNotFoundError

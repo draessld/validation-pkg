@@ -1,6 +1,0 @@
-Config Test Case 2: Full configuration with all optional fields
-- All required and optional fields present
-- Multiple read files
-- Plasmids and features included
-- Options specified
-- Expected: Should load successfully with all fields populated

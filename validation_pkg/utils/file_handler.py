@@ -17,6 +17,9 @@ from typing import Union, TextIO
 from validation_pkg.utils.formats import CodingType, GenomeFormat, ReadFormat, FeatureFormat
 from validation_pkg.exceptions import CompressionError
 
+import subprocess
+import os
+
 
 def open_file_with_coding_type(
     filepath: Union[str, Path],
@@ -170,3 +173,22 @@ def get_file_format(filepath: Union[str, Path]) -> str:
     return format_map.get(ext, 'unknown')
 
 
+def gz_to_bz2(gz_file:Path, bz2_file:Path):
+
+    subprocess.run(
+        f"gzip -dc {gz_file} | bzip2 > {bz2_file}",
+        shell=True, check=True
+    )
+
+
+def bz2_to_gz(bz2_file:Path, gz_file:Path):
+    subprocess.run(
+        f"bzip2 -dc {bz2_file} | gzip > {gz_file}",
+        shell=True, check=True
+    )
+
+def none_to_gz(none_file:Path, gz_file:Path):
+    subprocess.run(
+        f"gzip {none_file} > {gz_file}",
+        shell=True, check=True
+    )

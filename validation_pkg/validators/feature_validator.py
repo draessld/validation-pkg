@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List, IO
 from dataclasses import dataclass
 import gzip
 import bz2
+import shutil
 
 from validation_pkg.logger import get_logger
 from validation_pkg.utils.settings import BaseSettings
@@ -19,6 +20,7 @@ from validation_pkg.exceptions import (
     GffFormatError,
     CompressionError,
 )
+from validation_pkg.utils.formats import CodingType as CT
 from validation_pkg.utils.formats import FeatureFormat
 
 @dataclass
@@ -33,7 +35,6 @@ class Feature:
     source: str = "."
     frame: str = "."
     attributes: str = ""
-    original_format: str = "gff"
 
     @property
     def length(self) -> int:
@@ -50,7 +51,6 @@ class FeatureValidator:
     2. Parse features from file
     3. Validate feature coordinates and structure
     4. Apply editing specifications (sort, replace IDs)
-    5. Collect statistics
     6. Convert to GFF format (if needed)
     7. Save to output directory
     """
@@ -61,6 +61,10 @@ class FeatureValidator:
         Settings for feature validation and processing.
 
         Attributes:
+            validation_level: Validation thoroughness level:
+                - 'strict': Full parsing and validation of all features (default)
+                - 'trust': Fast validation - check basic format and first few features
+                - 'minimal': Only verify file exists and has correct extension
             sort_by_position: Sort features by position (default: True)
             check_coordinates: Validate that start < end (default: True)
             allow_zero_length: Allow zero-length features (start == end) (default: False)
@@ -72,16 +76,22 @@ class FeatureValidator:
             output_filename_suffix: Suffix to add to output filename (default: None)
             output_subdir_name: Subdirectory name for output files (default: None)
 
+        Validation Level Behavior:
+            - validation_level='strict': Parse all features, validate all, apply edits to all
+            - validation_level='trust': Parse all features, validate first 10 only, apply edits to all
+            - validation_level='minimal': Skip parsing, copy file as-is
+
         Example:
             >>> settings = FeatureValidator.Settings()
             >>> settings = settings.update(sort_by_position=True, coding_type='gz', replace_id_with='chr1')
             >>> validator = FeatureValidator(feature_config, output_dir, settings)
         """
+        # Validation level
+        validation_level: str = 'strict'  # 'strict', 'trust', or 'minimal'
+
         # Validation options
         sort_by_position: bool = True
         check_coordinates: bool = True
-        allow_zero_length: bool = False
-        allow_negative_coords: bool = False
 
         # Editing options
         replace_id_with: Optional[str] = None
@@ -111,6 +121,14 @@ class FeatureValidator:
         self.output_dir = Path(output_dir)
         self.settings = settings if settings is not None else self.Settings()
 
+        # Validate validation_level setting
+        valid_levels = {'strict', 'trust', 'minimal'}
+        if self.settings.validation_level not in valid_levels:
+            raise ValueError(
+                f"Invalid validation_level '{self.settings.validation_level}'. "
+                f"Must be one of: {', '.join(valid_levels)}"
+            )
+
         # Log settings being used
         self.logger.debug(f"Initializing FeatureValidator with settings:\n{self.settings}")
 
@@ -120,17 +138,6 @@ class FeatureValidator:
         # Parsed data
         self.features: List[Feature] = []
 
-        # Statistics
-        self.statistics = {
-            'num_features': 0,
-            'num_by_type': {},
-            'num_by_strand': {'+': 0, '-': 0, '.': 0},
-            'total_span': 0,
-            'min_length': 0,
-            'max_length': 0,
-            'avg_length': 0.0
-        }
-    
     def validate(self) -> None:
         """
         Main validation and processing workflow.
@@ -144,23 +151,17 @@ class FeatureValidator:
         self.logger.debug(f"Format: {self.feature_config.detected_format}, Compression: {self.feature_config.coding_type}")
 
         try:
-            # Step 1: Parse and validate
             self._parse_file()
 
-            # Step 2: Apply editing specifications
-            self._apply_edits()
+            self._validate_features()
 
-            # Step 3: Collect statistics
-            self._collect_statistics()
-
-            # Step 4: Convert to GFF (if needed)
             self._convert_to_gff()
 
-            # Step 5: Save to output directory
-            output_path = self._save_output()
+            self._apply_edits()
 
-            self.logger.info(f"✓ Feature validation completed: {output_path.name}")
-            self.logger.debug(f"Statistics: {self.statistics}")
+            self._save_output()
+
+            self.logger.info(f"✓ Feature validation completed")
 
         except Exception as e:
             self.logger.error(f"Feature validation failed: {e}")
@@ -198,9 +199,22 @@ class FeatureValidator:
             raise
 
     def _parse_file(self) -> None:
-        """Parse feature file based on detected format from feature_config."""
+        """
+        Parse feature file based on detected format from feature_config.
+
+        Behavior depends on validation_level:
+        - 'strict': Full parsing and validation of all features
+        - 'trust': Parse all features, but validate only first 10
+        - 'minimal': Skip parsing entirely
+        """
         format_str = str(self.feature_config.detected_format)
-        self.logger.debug(f"Parsing {format_str} file...")
+        self.logger.debug(f"Parsing {format_str} file (validation_level={self.settings.validation_level})...")
+
+        # Minimal mode - skip parsing
+        if self.settings.validation_level == 'minimal':
+            self.logger.info("Minimal validation mode - skipping file parsing")
+            self.features = []
+            return
 
         try:
             with self._open_file() as handle:
@@ -222,11 +236,10 @@ class FeatureValidator:
                 )
                 # Empty feature files are allowed, just warn
 
-            self.logger.debug(f"Parsed {len(self.features)} feature(s)")
-
-            # Validate features
-            if self.features:
-                self._validate_features()
+            if self.settings.validation_level == 'trust':
+                self.logger.info(f"Trust mode - parsed {len(self.features)} feature(s), will validate first 10 only")
+            else:
+                self.logger.debug(f"Parsed {len(self.features)} feature(s)")
 
         except (FileFormatError, FeatureValidationError):
             raise
@@ -267,10 +280,13 @@ class FeatureValidator:
         GFF format (tab-separated):
         seqname source feature start end score strand frame attributes
 
+        Parses all features regardless of validation_level.
+
         Returns:
             List of Feature objects
         """
         features = []
+
         for line_num, line in enumerate(handle, start=1):
             line = line.strip()
             if self._skip_line(line):
@@ -295,7 +311,6 @@ class FeatureValidator:
                     strand=self._normalize_strand(parts[6]),
                     frame=parts[7],
                     attributes=parts[8] if len(parts) > 8 else "",
-                    original_format="gff"
                 )
                 features.append(feature)
 
@@ -305,18 +320,6 @@ class FeatureValidator:
 
         return features
 
-    def _log_parse_warning(self, message: str, line_num: int, content: str = "") -> None:
-        """Log a parsing warning."""
-        details = {'line': line_num}
-        if content:
-            details['content'] = content[:100]
-        self.logger.add_validation_issue(
-            level='WARNING',
-            category='feature',
-            message=message,
-            details=details
-        )
-
     def _parse_bed(self, handle) -> List[Feature]:
         """
         Parse BED format file.
@@ -324,10 +327,13 @@ class FeatureValidator:
         BED format (tab-separated, minimum 3 columns):
         chrom start end [name] [score] [strand] [...]
 
+        Parses all features regardless of validation_level.
+
         Returns:
             List of Feature objects
         """
         features = []
+
         for line_num, line in enumerate(handle, start=1):
             line = line.strip()
             if self._skip_line(line):
@@ -352,7 +358,6 @@ class FeatureValidator:
                     source=".",
                     feature_type="region",
                     frame=".",
-                    original_format="bed"
                 )
                 features.append(feature)
 
@@ -362,51 +367,81 @@ class FeatureValidator:
 
         return features
 
+    def _log_parse_warning(self, message: str, line_num: int, content: str = "") -> None:
+        """Log a parsing warning."""
+        details = {'line': line_num}
+        if content:
+            details['content'] = content[:100]
+        self.logger.add_validation_issue(
+            level='WARNING',
+            category='feature',
+            message=message,
+            details=details
+        )
+
     def _validate_features(self) -> None:
-        """Validate parsed features."""
+        """
+        Validate parsed features.
+
+        Behavior depends on validation_level:
+        - 'strict': Validate all features
+        - 'trust': Validate only first 10 features
+        - 'minimal': Skip validation (no parsing done)
+        """
         self.logger.debug("Validating features...")
 
-        for idx, feature in enumerate(self.features):
-            self._validate_coordinates(feature, idx)
-            self._validate_negative_coords(feature, idx)
+        # Minimal mode - no features to validate
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - skipping feature validation")
+            return
+
+        # Determine how many features to validate
+        if self.settings.validation_level == 'trust':
+            # Trust mode - validate only first 10 features
+            features_to_validate = min(10, len(self.features))
+            self.logger.debug(f"Trust mode - validating first {features_to_validate} of {len(self.features)} features")
+        else:
+            # Strict mode - validate all features
+            features_to_validate = len(self.features)
+
+        # Validate features
+        if self.settings.check_coordinates:
+            for idx in range(features_to_validate):
+                self._validate_coordinates(self.features[idx], idx)
 
         self.logger.debug("✓ Feature validation passed")
 
     def _validate_coordinates(self, feature: Feature, idx: int) -> None:
         """Validate feature coordinates."""
-        if not self.settings.check_coordinates:
-            return
-
         if feature.start > feature.end:
-            self._raise_validation_error(
-                f"Feature has start > end: {feature.seqname}:{feature.start}-{feature.end}",
-                {'feature_index': idx, 'seqname': feature.seqname,
-                 'start': feature.start, 'end': feature.end}
+            error_message = f"Feature has start > end: {feature.seqname}:{feature.start}-{feature.end}"
+            self.logger.add_validation_issue(
+                level='ERROR',
+                category='feature',
+                message=error_message,
+                details={'feature_index': idx, 'seqname': feature.seqname, 'start': feature.start, 'end': feature.end}
             )
+            raise FeatureValidationError(error_message)
 
-        if feature.start == feature.end and not self.settings.allow_zero_length:
-            self._raise_validation_error(
-                f"Zero-length feature not allowed: {feature.seqname}:{feature.start}-{feature.end}",
-                {'feature_index': idx, 'seqname': feature.seqname, 'position': feature.start}
+        if feature.start < 0 or feature.end < 0:
+            error_message = f"Negative coordinates not allowed: {feature.seqname}:{feature.start}-{feature.end}"
+            self.logger.add_validation_issue(
+                level='ERROR',
+                category='feature',
+                message=error_message,
+                details={'feature_index': idx, 'seqname': feature.seqname}
             )
+            raise FeatureValidationError(error_message)
 
-    def _validate_negative_coords(self, feature: Feature, idx: int) -> None:
-        """Validate feature doesn't have negative coordinates."""
-        if not self.settings.allow_negative_coords and (feature.start < 0 or feature.end < 0):
-            self._raise_validation_error(
-                f"Negative coordinates not allowed: {feature.seqname}:{feature.start}-{feature.end}",
-                {'feature_index': idx, 'seqname': feature.seqname}
+        if feature.start == feature.end:
+            error_message = f"Zero-length feature not allowed: {feature.seqname}:{feature.start}-{feature.end}"
+            self.logger.add_validation_issue(
+                level='ERROR',
+                category='feature',
+                message=error_message,
+                details={'feature_index': idx, 'seqname': feature.seqname, 'position': feature.start}
             )
-
-    def _raise_validation_error(self, message: str, details: Dict[str, Any]) -> None:
-        """Log and raise a validation error."""
-        self.logger.add_validation_issue(
-            level='ERROR',
-            category='feature',
-            message=message,
-            details=details
-        )
-        raise FeatureValidationError(message)
+            raise FeatureValidationError(error_message)
 
     def _parse_gff_attributes(self, attr_string: str) -> Dict[str, str]:
         """
@@ -487,8 +522,18 @@ class FeatureValidator:
         Applies the following edits (if enabled in settings):
         - Sort features by position (sort_by_position)
         - Replace feature seqname/chromosome field (replace_id_with)
+
+        Behavior depends on validation_level:
+        - 'strict': Apply all edits to all features
+        - 'trust': Apply all edits to parsed features (first 10)
+        - 'minimal': Skip edits (file will be copied as-is)
         """
         self.logger.debug("Applying editing specifications from settings...")
+
+        # Minimal mode - skip edits, file will be copied as-is
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - skipping edits")
+            return
 
         # Sort by position (seqname, then start, then end)
         if self.settings.sort_by_position:
@@ -505,21 +550,20 @@ class FeatureValidator:
                 # Store original seqname in attributes
                 old_seqname = feature.seqname
 
-                if feature.original_format == 'gff':
-                    # Parse GFF attributes
-                    attrs = self._parse_gff_attributes(feature.attributes)
+                # Parse GFF attributes
+                attrs = self._parse_gff_attributes(feature.attributes)
 
-                    # Store original seqname in Note field (GFF3 standard)
-                    note_text = f"Original_seqname:{old_seqname}"
-                    if 'Note' in attrs and attrs['Note']:
-                        # Append to existing Note
-                        attrs['Note'] = f"{attrs['Note']};{note_text}"
-                    else:
-                        # Create new Note
-                        attrs['Note'] = note_text
+                # Store original seqname in Note field (GFF3 standard)
+                note_text = f"Original_seqname:{old_seqname}"
+                if 'Note' in attrs and attrs['Note']:
+                    # Append to existing Note
+                    attrs['Note'] = f"{attrs['Note']};{note_text}"
+                else:
+                    # Create new Note
+                    attrs['Note'] = note_text
 
-                    # Rebuild attributes string
-                    feature.attributes = self._build_gff_attributes(attrs)
+                # Rebuild attributes string
+                feature.attributes = self._build_gff_attributes(attrs)
 
                 # Replace seqname for both GFF and BED
                 feature.seqname = new_seqname
@@ -528,99 +572,109 @@ class FeatureValidator:
 
         self.logger.debug(f"✓ Edits applied, {len(self.features)} feature(s) remaining")
 
-    def _collect_statistics(self) -> None:
-        """Collect statistics about the features."""
-        self.logger.debug("Collecting statistics...")
-
-        if not self.features:
-            return
-
-        type_counts = {}
-        strand_counts = {'+': 0, '-': 0, '.': 0}
-        lengths = [f.length for f in self.features]
-
-        for feature in self.features:
-            type_counts[feature.feature_type] = type_counts.get(feature.feature_type, 0) + 1
-            if feature.strand in strand_counts:
-                strand_counts[feature.strand] += 1
-
-        self.statistics = {
-            'num_features': len(self.features),
-            'num_by_type': type_counts,
-            'num_by_strand': strand_counts,
-            'total_span': sum(lengths),
-            'min_length': min(lengths) if lengths else 0,
-            'max_length': max(lengths) if lengths else 0,
-            'avg_length': sum(lengths) / len(lengths) if lengths else 0.0
-        }
-
-        self.logger.debug(f"Statistics: {self.statistics}")
-
     def _convert_to_gff(self) -> None:
         """Convert features to GFF format (if needed and requested)."""
         if self.feature_config.detected_format == FeatureFormat.GFF:
             self.logger.debug("Keeping GFF format")
             return
 
-        # Check if we need conversion
-        bed_features = [f for f in self.features if f.original_format == 'bed']
+        self.logger.debug(f"Converting {len(self.features)} BED features to GFF format...")
 
-        if bed_features:
-            self.logger.debug(f"Converting {len(bed_features)} BED features to GFF format...")
+        # BED is 0-based half-open, GFF is 1-based closed
+        # Convert: BED [start, end) -> GFF [start+1, end]
+        for feature in self.features:
+            feature.start += 1  # Convert from 0-based to 1-based
 
-            # BED is 0-based half-open, GFF is 1-based closed
-            # Convert: BED [start, end) -> GFF [start+1, end]
-            for feature in bed_features:
-                if feature.original_format == 'bed':
-                    feature.start += 1  # Convert from 0-based to 1-based
-                    feature.original_format = 'gff'  # Mark as converted
-
-            self.logger.debug("✓ BED to GFF conversion complete")
-        else:
-            self.logger.debug("All features already in GFF format")
+        self.logger.debug("✓ BED to GFF conversion complete")
 
     def _save_output(self) -> Path:
         """
         Save processed features to output directory using settings.
+
+        Behavior depends on validation_level:
+        - 'strict': Write features using parser (may convert format)
+        - 'trust': Write parsed features (first 10 only) - NOT RECOMMENDED, use strict instead
+        - 'minimal': Copy file as-is (preserve original format)
 
         Returns:
             Path to output file
         """
         self.logger.debug("Saving output file...")
 
-        output_path = self._get_output_path()
-        self._write_output_file(output_path)
-
-        self.logger.info(f"Output saved: {output_path}")
-        return output_path
-
-    def _get_output_path(self) -> Path:
-        """Determine the output file path."""
+        # Determine output directory (with optional subdirectory)
         output_dir = self.output_dir
         if self.settings.output_subdir_name:
             output_dir = output_dir / self.settings.output_subdir_name
+
+        # Create output directory
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Generate output filename from original filename (without compression extension)
+        # Get base name without any extensions
         base_name = self.feature_config.filename
+
+        # Remove all suffixes (.gff.gz -> remove .gz then .gff)
         for suffix in self.input_path.suffixes:
             base_name = base_name.replace(suffix, '')
-
-        format_ext = '.gff' if any(f.original_format == 'gff' for f in self.features) else '.bed'
-
+        # Add suffix if specified
         if self.settings.output_filename_suffix:
-            output_filename = f"{base_name}_{self.settings.output_filename_suffix}{format_ext}"
+            output_filename = f"{base_name}_{self.settings.output_filename_suffix}.gff"
         else:
-            output_filename = f"{base_name}{format_ext}"
+            output_filename = f"{base_name}.gff"
 
-        if self.settings.coding_type == 'gz':
+        # Add compression extension if requested (from settings, not input)
+        # Support both string ('gz', 'bz2') and enum (CodingType.GZIP, CodingType.BZIP2)
+        coding = self.settings.coding_type
+
+        if coding in ('gz', 'gzip', CT.GZIP):
             output_filename += '.gz'
-        elif self.settings.coding_type == 'bz2':
+        elif coding in ('bz2', 'bzip2', CT.BZIP2):
             output_filename += '.bz2'
 
-        return output_dir / output_filename
+        # Minimal mode - copy file as-is without parsing
+        # Required: GFF format + NO compression
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - validating format and coding requirements")
 
-    def _write_output_file(self, output_path: Path) -> None:
-        """Write features to output file with appropriate compression."""
+            # Check format - must be GFF (reject BED files)
+            if self.feature_config.detected_format != FeatureFormat.GFF:
+                error_msg = f'Minimal mode requires GFF format, got {self.feature_config.detected_format}. Use validation_level "trust" or "strict" to convert.'
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='feature',
+                    message=error_msg,
+                    details={'file': self.feature_config.filename, 'detected_format': str(self.feature_config.detected_format)}
+                )
+                raise FeatureValidationError(error_msg)
+
+            # Check coding - must be uncompressed (NONE)
+            if self.feature_config.coding_type and self.feature_config.coding_type != CT.NONE:
+                error_msg = f'Minimal mode requires uncompressed GFF, got {self.feature_config.coding_type}. Use validation_level "trust" or "strict" to change compression.'
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='feature',
+                    message=error_msg,
+                    details={'file': self.feature_config.filename, 'coding_type': str(self.feature_config.coding_type)}
+                )
+                raise FeatureValidationError(error_msg)
+
+            # Normalize output filename - always .gff extension
+            if self.settings.output_filename_suffix:
+                output_filename_minimal = f"{base_name}_{self.settings.output_filename_suffix}.gff"
+            else:
+                output_filename_minimal = f"{base_name}.gff"
+
+            output_path_minimal = output_dir / output_filename_minimal
+
+            # Copy file
+            self.logger.debug(f"Copying {self.input_path} to {output_path_minimal}")
+            shutil.copy2(self.input_path, output_path_minimal)
+
+            self.logger.info(f"Output saved: {output_path_minimal}")
+            return output_path_minimal
+
+        # Strict and Trust modes - write edited features
+        output_path = output_dir / output_filename
         self.logger.debug(f"Writing output to: {output_path}")
 
         open_func = {
@@ -630,19 +684,6 @@ class FeatureValidator:
         }.get(self.settings.coding_type, lambda p: open(p, 'w'))
 
         with open_func(output_path) as handle:
-            self._write_features(handle)
-
-    def _write_features(self, handle: IO) -> None:
-        """
-        Write features to file handle in appropriate format.
-
-        Args:
-            handle: File handle to write to
-        """
-        # Determine output format
-        use_gff = any(f.original_format == 'gff' for f in self.features)
-
-        if use_gff:
             # Write GFF header
             handle.write("##gff-version 3\n")
 
@@ -660,38 +701,6 @@ class FeatureValidator:
                     feature.attributes
                 ])
                 handle.write(line + '\n')
-        else:
-            # Write BED format (convert back if needed)
-            for feature in self.features:
-                # If feature was converted to GFF, convert back to BED coordinates
-                start = feature.start - 1 if feature.original_format == 'gff' else feature.start
 
-                # BED minimum 3 columns, write up to 6
-                parts = [
-                    feature.seqname,
-                    str(start),
-                    str(feature.end)
-                ]
-
-                if feature.attributes:
-                    parts.append(feature.attributes)
-                if feature.score and feature.score != '.':
-                    while len(parts) < 4:
-                        parts.append('.')
-                    parts.append(feature.score)
-                if feature.strand and feature.strand != '.':
-                    while len(parts) < 5:
-                        parts.append('.')
-                    parts.append(feature.strand)
-
-                line = '\t'.join(parts)
-                handle.write(line + '\n')
-
-    def get_statistics(self) -> Dict[str, Any]:
-        """
-        Get statistics about the processed features.
-
-        Returns:
-            Dictionary of statistics
-        """
-        return self.statistics.copy()
+        self.logger.info(f"Output saved: {output_path}")
+        return

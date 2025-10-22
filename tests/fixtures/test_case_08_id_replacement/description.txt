@@ -1,5 +1,0 @@
-Test Case 8: Genome with ID replacement
-- Three sequences with original IDs
-- Tests replace_id_with functionality
-- With replace_id_with="chr": All IDs should be replaced with "chr"
-- Original IDs should be preserved in description

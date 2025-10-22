@@ -16,7 +16,7 @@ import shutil
 
 from validation_pkg.logger import get_logger
 from validation_pkg.utils.settings import BaseSettings
-from validation_pkg.utils.formats import CodingType as CT
+from validation_pkg.utils.formats import CodingType as CT, GenomeFormat
 from validation_pkg.exceptions import (
     GenomeValidationError,
     FileFormatError,
@@ -144,7 +144,6 @@ class GenomeValidator:
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
 
-    
     def validate(self) -> None:
         """
         Main validation and processing workflow.
@@ -166,9 +165,9 @@ class GenomeValidator:
 
             self._apply_edits() # include plasmid handle
 
-            output_path = self._save_output()
+            self._save_output()
 
-            self.logger.info(f"✓ Genome validation completed: {output_path.name}")
+            self.logger.info(f"✓ Genome validation completed")
 
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")
@@ -398,6 +397,8 @@ class GenomeValidator:
 
         # 2. Add sequence prefix
         #   TODO: before or after plasmid handling? - what is plasmid file correspond to ref genome, where the id is changes??
+        #   TODO: plasmidy nepotrebuji stejny ID
+        #   TODO: _ref_plasmid mergnout s _ref_plasmid ze zvlastniho souboru.
         if self.settings.replace_id_with:
             prefix = self.settings.replace_id_with
             for record in self.sequences:
@@ -579,31 +580,6 @@ class GenomeValidator:
         # Create output directory
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Minimal mode - copy file as-is without parsing
-        if self.settings.validation_level == 'minimal':
-            self.logger.debug("Minimal mode - copying file as-is")
-
-            # Keep original filename and format
-            output_filename = self.genome_config.filename
-            if self.settings.output_filename_suffix:
-                # Insert suffix before extensions
-                base_name = self.genome_config.filename
-                for suffix in self.input_path.suffixes:
-                    base_name = base_name.replace(suffix, '')
-                # Reconstruct with suffix and original extensions
-                extensions = ''.join(self.input_path.suffixes)
-                output_filename = f"{base_name}_{self.settings.output_filename_suffix}{extensions}"
-
-            output_path = output_dir / output_filename
-
-            # Copy file
-            self.logger.debug(f"Copying {self.input_path} to {output_path}")
-            shutil.copy2(self.input_path, output_path)
-
-            self.logger.info(f"Output saved: {output_path}")
-            return output_path
-
-        # Strict and Trust modes - write sequences using BioPython
         # Generate output filename from original filename (without compression extension)
         # Get base name without any extensions
         base_name = self.genome_config.filename
@@ -626,6 +602,54 @@ class GenomeValidator:
         elif coding in ('bz2', 'bzip2', CT.BZIP2):
             output_filename += '.bz2'
 
+        # Minimal mode - copy file as-is without parsing
+        # Required: FASTA format + NO compression
+        if self.settings.validation_level == 'minimal':
+            self.logger.debug("Minimal mode - validating format and coding requirements")
+
+            # Check format - must be FASTA
+            if self.genome_config.detected_format != GenomeFormat.FASTA:
+                error_msg = f'Minimal mode requires FASTA format, got {self.genome_config.detected_format}. Use validation_level "trust" or "strict" to convert.'
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='genome',
+                    message=error_msg,
+                    details={'file': self.genome_config.filename, 'detected_format': str(self.genome_config.detected_format)}
+                )
+                raise GenomeValidationError(error_msg)
+
+            # Check coding - must be uncompressed (NONE)
+            if self.genome_config.coding_type and self.genome_config.coding_type != CT.NONE:
+                error_msg = f'Minimal mode requires uncompressed FASTA, got {self.genome_config.coding_type}. Use validation_level "trust" or "strict" to change compression.'
+                self.logger.add_validation_issue(
+                    level='ERROR',
+                    category='genome',
+                    message=error_msg,
+                    details={'file': self.genome_config.filename, 'coding_type': str(self.genome_config.coding_type)}
+                )
+                raise GenomeValidationError(error_msg)
+
+            # Normalize output filename - always .fasta extension
+            if self.settings.output_filename_suffix:
+                output_filename_minimal = f"{base_name}_{self.settings.output_filename_suffix}.fasta"
+            else:
+                output_filename_minimal = f"{base_name}.fasta"
+
+            output_path_minimal = output_dir / output_filename_minimal
+
+            # Copy file
+            self.logger.debug(f"Copying {self.input_path} to {output_path_minimal}")
+            shutil.copy2(self.input_path, output_path_minimal)
+
+            self.logger.info(f"Output saved: {output_path_minimal}")
+            return output_path_minimal
+
+        # Strict and Trust modes - write sequences using BioPython
+        # Check if we have sequences to write
+        if self.sequences == []:
+            self.logger.warning("No sequences to write")
+            return None
+
         output_path = output_dir / output_filename
 
         # Write output with appropriate compression
@@ -643,4 +667,4 @@ class GenomeValidator:
 
         self.logger.info(f"Output saved: {output_path}")
 
-        return output_path
+        return

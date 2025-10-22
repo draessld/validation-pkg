@@ -1,2 +1,0 @@
-##gff-version 3
-chr1	.	gene	100	200	.	+	.	ID=gene1;Name=testGene

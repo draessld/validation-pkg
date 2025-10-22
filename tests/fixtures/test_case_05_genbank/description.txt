@@ -1,4 +1,0 @@
-Test Case 5: GenBank format
-- GenBank file with features
-- Tests GenBank parsing and conversion to FASTA
-- Expected: Should parse GenBank and output as FASTA

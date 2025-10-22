@@ -1,3 +1,0 @@
-Config Test Case 6: Missing config file
-- No config.json file present
-- Expected: Should raise FileNotFoundError

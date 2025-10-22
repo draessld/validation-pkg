@@ -1191,8 +1191,8 @@ class TestGenomeValidatorValidationLevels:
         # All sequences remain (plasmid_split=False by default)
         assert len(validator.sequences) == 2
 
-    def test_minimal_compressed_bz2_passes(self, temp_dir, output_dir):
-        """Test minimal mode with bzip2 compressed file."""
+    def test_minimal_compressed_bz2_raises_error(self, temp_dir, output_dir):
+        """Test minimal mode with bzip2 compressed file - should raise error."""
         fasta_file = temp_dir / "genome.fasta.bz2"
         with bz2.open(fasta_file, "wt") as f:
             f.write(">chr1\n")
@@ -1210,11 +1210,10 @@ class TestGenomeValidatorValidationLevels:
         )
 
         validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
 
-        # Output should exist and be copied
-        output_files = list(output_dir.glob("*.bz2"))
-        assert len(output_files) == 1
+        # Should raise error - minimal mode doesn't support compressed files
+        with pytest.raises(GenomeValidationError, match="Minimal mode requires uncompressed FASTA"):
+            validator.validate()
 
     # ===== Test for invalid validation level =====
 

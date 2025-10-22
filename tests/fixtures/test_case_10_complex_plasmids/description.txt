@@ -1,5 +1,0 @@
-Test Case 10: Complex multi-plasmid genome
-- One chromosome (540 bp) + four plasmids of varying sizes
-- Tests plasmid splitting with multiple plasmids
-- Expected: Chromosome in main file, each plasmid in separate indexed file
-- Plasmids should be sorted by length (longest first)

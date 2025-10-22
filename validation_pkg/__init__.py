@@ -86,7 +86,7 @@ Workflow
 2. **Validate genomes:** Check reference and modified genome files
 3. **Validate features:** Validate feature annotations (optional)
 4. **Validate reads:** Process all sequencing read files
-5. **Generate report:** Create detailed validation report with statistics
+5. **Generate report:** Create detailed validation report
 
 Error Handling
 -------------
@@ -145,9 +145,6 @@ def validate_genome(
         output_dir: Directory for output files
         settings: Optional GenomeValidator.Settings object (uses defaults if None)
 
-    Returns:
-        Dictionary with validation statistics
-
     Example:
         >>> config = ConfigManager.load("config.json")
         >>> settings = GenomeValidator.Settings()
@@ -177,8 +174,6 @@ def validate_read(
         output_dir: Directory for output files
         settings: Optional ReadValidator.Settings object (uses defaults if None)
 
-    Returns:
-        Dictionary with validation statistics
 
     Example:
         >>> config = ConfigManager.load("config.json")
@@ -209,8 +204,6 @@ def validate_reads(
         output_dir: Directory for output files
         settings: Optional ReadValidator.Settings object (uses defaults if None)
 
-    Returns:
-        List of dictionaries with validation statistics for each file
 
     Example:
         >>> config = ConfigManager.load("config.json")
@@ -246,8 +239,6 @@ def validate_feature(
         output_dir: Directory for output files
         settings: Optional FeatureValidator.Settings object (uses defaults if None)
 
-    Returns:
-        Dictionary with validation statistics
 
     Example:
         >>> config = ConfigManager.load("config.json")
@@ -261,9 +252,6 @@ def validate_feature(
 
     validator = FeatureValidator(feature_config, output_path, settings)
     validator.validate()
-
-    return validator.get_statistics()
-
 
 # Alias for backward compatibility and convenience
 validate_features = validate_feature

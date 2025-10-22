@@ -69,14 +69,12 @@ class TestFeatureValidatorInitialization:
         assert validator.output_dir == output_dir
         assert validator.settings is not None
         assert validator.features == []
-        assert isinstance(validator.statistics, dict)
 
     def test_init_with_custom_settings(self, simple_gff, output_dir):
         """Test initialization with custom settings."""
         settings = FeatureValidator.Settings(
             sort_by_position=True,
             check_coordinates=True,
-            allow_zero_length=True,
         )
 
         feature_config = FeatureConfig(
@@ -90,7 +88,6 @@ class TestFeatureValidatorInitialization:
 
         assert validator.settings.sort_by_position is True
         assert validator.settings.check_coordinates is True
-        assert validator.settings.allow_zero_length is True
 
 
 class TestFeatureValidatorParsing:
@@ -298,7 +295,7 @@ class TestFeatureValidatorValidation:
             validator.validate()
 
     def test_zero_length_feature_not_allowed(self, temp_dir, output_dir):
-        """Test validation fails for zero-length features when not allowed."""
+        """Test validation fails for zero-length features (hardcoded check)."""
         gff_file = temp_dir / "zero_length.gff"
         with open(gff_file, "w") as f:
             f.write("##gff-version 3\n")
@@ -311,40 +308,14 @@ class TestFeatureValidatorValidation:
             detected_format=FeatureFormat.GFF
         )
 
-        settings = FeatureValidator.Settings(
-            check_coordinates=True,
-            allow_zero_length=False
-        )
+        settings = FeatureValidator.Settings(check_coordinates=True)
         validator = FeatureValidator(feature_config, output_dir, settings)
 
         with pytest.raises(FeatureValidationError, match="Zero-length feature"):
             validator.validate()
 
-    def test_zero_length_feature_allowed(self, temp_dir, output_dir):
-        """Test validation succeeds for zero-length features when allowed."""
-        gff_file = temp_dir / "zero_length.gff"
-        with open(gff_file, "w") as f:
-            f.write("##gff-version 3\n")
-            f.write("chr1\ttest\tgene\t100\t100\t.\t+\t.\tID=gene1\n")
-
-        feature_config = FeatureConfig(
-            filename="zero_length.gff",
-            filepath=gff_file,
-            coding_type=CodingType.NONE,
-            detected_format=FeatureFormat.GFF
-        )
-
-        settings = FeatureValidator.Settings(
-            check_coordinates=True,
-            allow_zero_length=True
-        )
-        validator = FeatureValidator(feature_config, output_dir, settings)
-        validator.validate()
-
-        assert len(validator.features) == 1
-
     def test_negative_coordinates(self, temp_dir, output_dir):
-        """Test validation fails for negative coordinates."""
+        """Test validation fails for negative coordinates (hardcoded check)."""
         gff_file = temp_dir / "negative.gff"
         with open(gff_file, "w") as f:
             f.write("##gff-version 3\n")
@@ -357,7 +328,8 @@ class TestFeatureValidatorValidation:
             detected_format=FeatureFormat.GFF
         )
 
-        validator = FeatureValidator(feature_config, output_dir)
+        settings = FeatureValidator.Settings(check_coordinates=True)
+        validator = FeatureValidator(feature_config, output_dir, settings)
 
         with pytest.raises(FeatureValidationError, match="Negative coordinates"):
             validator.validate()
@@ -430,54 +402,6 @@ class TestFeatureValidatorEditing:
         assert validator.features[1].seqname == "chr1"
 
 
-class TestFeatureValidatorStatistics:
-    """Test statistics collection."""
-
-    @pytest.fixture
-    def temp_dir(self):
-        """Create a temporary directory for test files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield Path(tmpdir)
-
-    @pytest.fixture
-    def output_dir(self, temp_dir):
-        """Create output directory."""
-        out_dir = temp_dir / "output"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        return out_dir
-
-    def test_statistics_collection(self, temp_dir, output_dir):
-        """Test comprehensive statistics collection."""
-        gff_file = temp_dir / "stats.gff"
-        with open(gff_file, "w") as f:
-            f.write("##gff-version 3\n")
-            f.write("chr1\ttest\tgene\t100\t200\t.\t+\t.\tID=gene1\n")  # length 100
-            f.write("chr1\ttest\tCDS\t120\t180\t.\t+\t0\tID=cds1\n")   # length 60
-            f.write("chr1\ttest\tgene\t300\t450\t.\t-\t.\tID=gene2\n")  # length 150
-
-        feature_config = FeatureConfig(
-            filename="stats.gff",
-            filepath=gff_file,
-            coding_type=CodingType.NONE,
-            detected_format=FeatureFormat.GFF
-        )
-
-        validator = FeatureValidator(feature_config, output_dir)
-        validator.validate()
-
-        stats = validator.get_statistics()
-
-        assert stats['num_features'] == 3
-        assert stats['num_by_type']['gene'] == 2
-        assert stats['num_by_type']['CDS'] == 1
-        assert stats['num_by_strand']['+'] == 2
-        assert stats['num_by_strand']['-'] == 1
-        assert stats['min_length'] == 60
-        assert stats['max_length'] == 150
-        assert stats['avg_length'] == pytest.approx(103.33, rel=0.1)
-        assert stats['total_span'] == 310
-
-
 class TestFeatureValidatorFormatConversion:
     """Test format conversion between BED and GFF."""
 
@@ -526,6 +450,7 @@ class TestFeatureValidatorFormatConversion:
             content = f.read()
             assert "##gff-version 3" in content
             assert "\t1\t100\t" in content  # GFF coordinates
+
 
 class TestFeatureValidatorOutput:
     """Test output generation."""
@@ -658,6 +583,306 @@ class TestFeatureValidatorOutput:
 
         output_file = output_dir / "features" / "test.gff"
         assert output_file.exists()
+
+
+class TestFeatureValidatorValidationLevels:
+    """Test multi-level validation modes (strict, trust, minimal)."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def output_dir(self, temp_dir):
+        out_dir = temp_dir / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    @pytest.fixture
+    def multi_feature_gff(self, temp_dir):
+        """Create a GFF file with multiple features."""
+        gff_file = temp_dir / "features.gff"
+        with open(gff_file, "w") as f:
+            f.write("##gff-version 3\n")
+            for i in range(1, 21):  # 20 features
+                f.write(f"chr1\ttest\tgene\t{i*100}\t{i*100+50}\t.\t+\t.\tID=gene{i}\n")
+        return gff_file
+
+    @pytest.fixture
+    def damaged_gff(self, temp_dir):
+        """Create a GFF file with invalid coordinates in first feature."""
+        gff_file = temp_dir / "damaged.gff"
+        with open(gff_file, "w") as f:
+            f.write("##gff-version 3\n")
+            f.write("chr1\ttest\tgene\t200\t100\t.\t+\t.\tID=gene1\n")  # start > end (invalid)
+            f.write("chr1\ttest\tgene\t300\t400\t.\t+\t.\tID=gene2\n")  # valid
+        return gff_file
+
+    # ===== Tests for STRICT validation level =====
+
+    def test_strict_correct_file_passes(self, multi_feature_gff, output_dir):
+        """Test strict mode with correct GFF file - should pass."""
+        settings = FeatureValidator.Settings(validation_level='strict')
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # All features should be parsed and validated
+        assert len(validator.features) == 20
+        # Output file should exist
+        output_files = list(output_dir.glob("*.gff"))
+        assert len(output_files) == 1
+
+    def test_strict_damaged_file_fails(self, damaged_gff, output_dir):
+        """Test strict mode with damaged file - should fail."""
+        settings = FeatureValidator.Settings(
+            validation_level='strict',
+            check_coordinates=True
+        )
+        feature_config = FeatureConfig(
+            filename="damaged.gff",
+            filepath=damaged_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+
+        with pytest.raises(FeatureValidationError, match="start > end"):
+            validator.validate()
+
+    def test_strict_applies_edits(self, multi_feature_gff, output_dir):
+        """Test strict mode applies all edits."""
+        settings = FeatureValidator.Settings(
+            validation_level='strict',
+            sort_by_position=True
+        )
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # Check that sorting was applied
+        for i in range(len(validator.features) - 1):
+            assert validator.features[i].start <= validator.features[i+1].start
+
+    # ===== Tests for TRUST validation level =====
+
+    def test_trust_correct_file_passes(self, multi_feature_gff, output_dir):
+        """Test trust mode with correct GFF file - should pass."""
+        settings = FeatureValidator.Settings(validation_level='trust')
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # All features should be parsed (20), only first 10 validated
+        assert len(validator.features) == 20
+        # Output file should exist with all features
+        output_files = list(output_dir.glob("*.gff"))
+        assert len(output_files) == 1
+
+    def test_trust_damaged_first_feature_fails(self, damaged_gff, output_dir):
+        """Test trust mode detects error in first feature."""
+        settings = FeatureValidator.Settings(
+            validation_level='trust',
+            check_coordinates=True
+        )
+        feature_config = FeatureConfig(
+            filename="damaged.gff",
+            filepath=damaged_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+
+        # Should fail because first feature has invalid coordinates
+        with pytest.raises(FeatureValidationError, match="start > end"):
+            validator.validate()
+
+    def test_trust_applies_edits_to_all(self, multi_feature_gff, output_dir):
+        """Test trust mode applies edits to all features."""
+        settings = FeatureValidator.Settings(
+            validation_level='trust',
+            sort_by_position=True
+        )
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # All 20 features should have edits applied
+        assert len(validator.features) == 20
+        # Check that sorting was applied to ALL features
+        for i in range(len(validator.features) - 1):
+            assert validator.features[i].start <= validator.features[i+1].start
+
+    # ===== Tests for MINIMAL validation level =====
+
+    def test_minimal_correct_file_passes(self, multi_feature_gff, output_dir):
+        """Test minimal mode with correct file - should pass without validation."""
+        settings = FeatureValidator.Settings(validation_level='minimal')
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # No features parsed in minimal mode
+        assert len(validator.features) == 0
+        # Output file should exist (copy)
+        output_files = list(output_dir.glob("*.gff"))
+        assert len(output_files) == 1
+
+    def test_minimal_damaged_file_passes(self, damaged_gff, output_dir):
+        """Test minimal mode with damaged file - should pass (no validation)."""
+        settings = FeatureValidator.Settings(
+            validation_level='minimal',
+            check_coordinates=True  # Ignored in minimal mode
+        )
+        feature_config = FeatureConfig(
+            filename="damaged.gff",
+            filepath=damaged_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        # Should NOT raise - minimal mode doesn't validate
+        validator.validate()
+
+        # Output should be created
+        output_files = list(output_dir.glob("*.gff"))
+        assert len(output_files) == 1
+
+    def test_minimal_output_is_copy(self, multi_feature_gff, output_dir):
+        """Test that minimal mode copies file as-is."""
+        settings = FeatureValidator.Settings(validation_level='minimal')
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # Check output file exists
+        output_files = list(output_dir.glob("*.gff"))
+        assert len(output_files) == 1
+
+        # Verify output is byte-for-byte identical to input
+        with open(multi_feature_gff, 'rb') as f_in, open(output_files[0], 'rb') as f_out:
+            assert f_in.read() == f_out.read()
+
+    def test_minimal_does_not_apply_edits(self, multi_feature_gff, output_dir):
+        """Test minimal mode does NOT apply edits."""
+        settings = FeatureValidator.Settings(
+            validation_level='minimal',
+            sort_by_position=True  # Should be ignored
+        )
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # Output should be identical to input (no edits applied)
+        output_file = list(output_dir.glob("*.gff"))[0]
+        with open(multi_feature_gff, 'r') as f_in, open(output_file, 'r') as f_out:
+            assert f_in.read() == f_out.read()
+
+    # ===== Test for compressed files =====
+
+    def test_trust_compressed_gz_passes(self, temp_dir, output_dir):
+        """Test trust mode with gzip compressed file."""
+        gff_file = temp_dir / "features.gff.gz"
+        with gzip.open(gff_file, "wt") as f:
+            f.write("##gff-version 3\n")
+            for i in range(1, 11):
+                f.write(f"chr1\ttest\tgene\t{i*100}\t{i*100+50}\t.\t+\t.\tID=gene{i}\n")
+
+        settings = FeatureValidator.Settings(validation_level='trust')
+        feature_config = FeatureConfig(
+            filename="features.gff.gz",
+            filepath=gff_file,
+            coding_type=CodingType.GZIP,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+        validator.validate()
+
+        # All features should be parsed
+        assert len(validator.features) == 10
+
+    def test_minimal_compressed_bz2_raises_error(self, temp_dir, output_dir):
+        """Test minimal mode with bzip2 compressed file - should raise error."""
+        gff_file = temp_dir / "features.gff.bz2"
+        with bz2.open(gff_file, "wt") as f:
+            f.write("##gff-version 3\n")
+            f.write("chr1\ttest\tgene\t100\t200\t.\t+\t.\tID=gene1\n")
+
+        settings = FeatureValidator.Settings(validation_level='minimal')
+        feature_config = FeatureConfig(
+            filename="features.gff.bz2",
+            filepath=gff_file,
+            coding_type=CodingType.BZIP2,
+            detected_format=FeatureFormat.GFF
+        )
+
+        validator = FeatureValidator(feature_config, output_dir, settings)
+
+        # Should raise error - minimal mode doesn't support compressed files
+        with pytest.raises(FeatureValidationError):
+            validator.validate()
+
+    # ===== Test for invalid validation level =====
+
+    def test_invalid_validation_level_raises_error(self, multi_feature_gff, output_dir):
+        """Test that invalid validation level raises ValueError."""
+        settings = FeatureValidator.Settings(validation_level='invalid_mode')
+        feature_config = FeatureConfig(
+            filename="features.gff",
+            filepath=multi_feature_gff,
+            coding_type=CodingType.NONE,
+            detected_format=FeatureFormat.GFF
+        )
+
+        with pytest.raises(ValueError, match="Invalid validation_level"):
+            FeatureValidator(feature_config, output_dir, settings)
 
 
 class TestFeatureValidatorEdgeCases:

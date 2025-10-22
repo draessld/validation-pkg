@@ -1,4 +1,0 @@
-Test Case 3: Compressed FASTA (gzip)
-- Single sequence compressed with gzip
-- Tests compression handling
-- Expected: Should decompress, parse, and output correctly

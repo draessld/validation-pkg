@@ -1,4 +1,0 @@
-Test Case 2: FASTA with multiple sequences (chromosome + plasmids)
-- One chromosome (360 bp) + two plasmids (88 bp, 133 bp)
-- Tests plasmid splitting functionality
-- Expected: Chromosome in main file, plasmids in separate files
