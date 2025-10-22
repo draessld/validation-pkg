@@ -25,7 +25,14 @@ from validation_pkg.exceptions import (
 )
 from validation_pkg.utils.formats import ReadFormat
 from validation_pkg.utils.formats import CodingType as CT
-from validation_pkg.utils.file_handler import bz2_to_gz, none_to_gz
+from validation_pkg.utils.file_handler import (
+    bz2_to_gz,
+    none_to_gz,
+    gz_to_bz2,
+    gz_to_none,
+    bz2_to_none,
+    none_to_bz2
+)
 
 class ReadValidator:
     """
@@ -414,23 +421,31 @@ class ReadValidator:
             self.sequences = []
             return
 
-        # Trust and Strict modes - full parsing
-        # Trust mode: Parse all, validate first 10 sequences
-        # Strict mode: Parse all, validate all sequences
+        # Trust mode: Parse only first 10 sequences for validation
+        # Strict mode: Parse all sequences
         if self.settings.validation_level == 'trust':
-            self.logger.info("Trust mode - parsing all sequences, will validate first 10 only")
+            self.logger.info("Trust mode - parsing first 10 sequences only for validation")
+            parse_limit = 10
+        else:
+            # Strict mode - parse all
+            parse_limit = None
+
         try:
-            # First, get total line count for progress reporting
-            try:
-                line_count = self._count_lines_fast()
-                estimated_sequences = line_count // 4  # FASTQ has 4 lines per sequence
-                self.logger.info(f"Processing {estimated_sequences:,} reads from FASTQ file...")
-                progress_interval = max(1, estimated_sequences // 20)  # Report every 5%
-            except Exception as e:
-                # If counting fails, just proceed without progress reporting
-                self.logger.debug(f"Could not count lines for progress reporting: {e}")
+            # Get total line count for progress reporting (strict mode only)
+            if self.settings.validation_level == 'strict':
+                try:
+                    line_count = self._count_lines_fast()
+                    estimated_sequences = line_count // 4  # FASTQ has 4 lines per sequence
+                    self.logger.info(f"Processing {estimated_sequences:,} reads from FASTQ file...")
+                    progress_interval = max(1, estimated_sequences // 20)  # Report every 5%
+                except Exception as e:
+                    # If counting fails, just proceed without progress reporting
+                    self.logger.debug(f"Could not count lines for progress reporting: {e}")
+                    estimated_sequences = None
+                    progress_interval = 100000  # Report every 100k reads
+            else:
                 estimated_sequences = None
-                progress_interval = 100000  # Report every 100k reads
+                progress_interval = None
 
             # Open file with automatic decompression
             handle = self._open_file()
@@ -438,15 +453,19 @@ class ReadValidator:
                 # Parse using BioPython with clean enum conversion
                 biopython_format = self.read_config.detected_format.to_biopython()
 
-                # Parse with progress reporting
+                # Parse sequences
                 self.sequences = []
                 processed = 0
                 for record in SeqIO.parse(handle, biopython_format):
                     self.sequences.append(record)
                     processed += 1
 
-                    # Progress reporting
-                    if processed % progress_interval == 0:
+                    # Trust mode - stop after parsing limit
+                    if parse_limit and processed >= parse_limit:
+                        break
+
+                    # Progress reporting (strict mode only)
+                    if progress_interval and processed % progress_interval == 0:
                         if estimated_sequences:
                             percent = (processed / estimated_sequences) * 100
                             self.logger.info(f"Progress: {processed:,}/{estimated_sequences:,} reads ({percent:.1f}%)")
@@ -852,19 +871,19 @@ class ReadValidator:
             output_filename = f"{base_name}.fastq"
 
 
-        # Add compression extension if requested (from settings, not input)
-        # Support both string ('gz', 'bz2') and enum (CodingType.GZIP, CodingType.BZIP2)
-        coding = self.settings.coding_type
+        # Add compression extension if requested (from settings)
+        # Normalize settings.coding_type to CodingType enum
+        coding = CT(self.settings.coding_type) if self.settings.coding_type else CT.NONE
 
-        if coding in ('gz', 'gzip', CT.GZIP):
+        if coding == CT.GZIP:
             output_filename += '.gz'
-        elif coding in ('bz2', 'bzip2', CT.BZIP2):
+        elif coding == CT.BZIP2:
             output_filename += '.bz2'
 
         output_path = output_dir / output_filename
 
         # Minimal mode - copy file as-is without parsing
-        # Required: FASTQ format + GZIP compression
+        # Required: FASTQ format + coding must match settings.coding_type
         if self.settings.validation_level == 'minimal':
             self.logger.debug("Minimal mode - validating format and coding requirements")
 
@@ -879,14 +898,18 @@ class ReadValidator:
                 )
                 raise ReadValidationError(error_msg)
 
-            # Check coding - must be GZIP
-            if not self.read_config.coding_type or self.read_config.coding_type != CT.GZIP:
-                error_msg = f'Minimal mode requires GZIP compressed FASTQ, got {self.read_config.coding_type}. Use validation_level "trust" or "strict" to change compression.'
+            # Check coding - must match settings.coding_type
+            # read_config.coding_type is CodingType enum, coding is normalized above
+            input_coding = self.read_config.coding_type
+            required_coding = coding
+
+            if input_coding != required_coding:
+                error_msg = f'Minimal mode requires input coding to match output coding. Input: {input_coding}, Required: {required_coding}. Use validation_level "trust" or "strict" to change compression.'
                 self.logger.add_validation_issue(
                     level='ERROR',
                     category='read',
                     message=error_msg,
-                    details={'file': self.read_config.filename, 'coding_type': str(self.read_config.coding_type)}
+                    details={'file': self.read_config.filename, 'input_coding': str(input_coding), 'required_coding': str(required_coding)}
                 )
                 raise ReadValidationError(error_msg)
 
@@ -916,13 +939,8 @@ class ReadValidator:
                 )
                 raise ReadValidationError(error_msg) from e
 
-            # Normalize output filename - always .fastq.gz extension
-            if self.settings.output_filename_suffix:
-                output_filename_minimal = f"{base_name}_{self.settings.output_filename_suffix}.fastq.gz"
-            else:
-                output_filename_minimal = f"{base_name}.fastq.gz"
-
-            output_path_minimal = output_dir / output_filename_minimal
+            # Use the output_filename already constructed (includes correct extension)
+            output_path_minimal = output_dir / output_filename
 
             # Copy file
             self.logger.debug(f"Copying {self.input_path} to {output_path_minimal}")
@@ -931,24 +949,51 @@ class ReadValidator:
             self.logger.info(f"Output saved: {output_path_minimal}")
             return output_path_minimal
 
-        # Trust mode - file conversion (deprecated, should use strict mode for full processing)
+        # Trust mode - copy original file with coding conversion
+        # Trust mode parsed only first 10 sequences for validation, so we copy the original file
         if self.settings.validation_level == 'trust':
-            # This trust mode behavior is for BAM files only - FASTQ trust mode uses full parsing
-            # Allow to change coding type for BAM conversion
-            if coding in ('bz2', 'bzip2', CT.BZIP2):
-                bz2_to_gz(self.input_path, output_path)
-            elif not coding:
-                none_to_gz(self.input_path, output_path)
+            self.logger.debug("Trust mode - copying original file with coding conversion")
+
+            # Both are CodingType enum: read_config.coding_type and coding (normalized above)
+            input_coding = self.read_config.coding_type
+            output_coding = coding
+
+            # If input and output coding match, simple copy
+            if input_coding == output_coding:
+                self.logger.debug(f"Copying {self.input_path} to {output_path} (same coding)")
+                shutil.copy2(self.input_path, output_path)
+            else:
+                # Convert coding using file_handler utilities
+                self.logger.debug(f"Converting {input_coding} -> {output_coding}")
+
+                # Map (input, output) pairs to conversion functions
+                conversion_map = {
+                    (CT.BZIP2, CT.GZIP): bz2_to_gz,
+                    (CT.NONE, CT.GZIP): none_to_gz,
+                    (CT.GZIP, CT.NONE): gz_to_none,
+                    (CT.BZIP2, CT.NONE): bz2_to_none,
+                    (CT.NONE, CT.BZIP2): none_to_bz2,
+                    (CT.GZIP, CT.BZIP2): gz_to_bz2,
+                }
+
+                conversion_func = conversion_map.get((input_coding, output_coding))
+                if conversion_func:
+                    conversion_func(self.input_path, output_path)
+                else:
+                    error_msg = f"Unsupported coding conversion: {input_coding} -> {output_coding}"
+                    raise ReadValidationError(error_msg)
+
+            self.logger.info(f"Output saved: {output_path}")
             return output_path
 
         # Strict mode - write sequences using BioPython (original behavior)
         # Write output with appropriate compression
         self.logger.debug(f"Writing output to: {output_path}")
 
-        if coding in ('gz', 'gzip', CT.GZIP):
+        if coding == CT.GZIP:
             with gzip.open(output_path, 'wt') as handle:
                 SeqIO.write(self.sequences, handle, 'fastq')
-        elif coding in ('bz2', 'bzip2', CT.BZIP2):
+        elif coding == CT.BZIP2:
             with bz2.open(output_path, 'wt') as handle:
                 SeqIO.write(self.sequences, handle, 'fastq')
         else:
@@ -957,5 +1002,5 @@ class ReadValidator:
 
         self.logger.info(f"Output saved: {output_path}")
 
-        return
+        return output_path
     

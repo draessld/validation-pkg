@@ -632,7 +632,7 @@ class FeatureValidator:
             output_filename += '.bz2'
 
         # Minimal mode - copy file as-is without parsing
-        # Required: GFF format + NO compression
+        # Required: GFF format + coding must match settings.coding_type
         if self.settings.validation_level == 'minimal':
             self.logger.debug("Minimal mode - validating format and coding requirements")
 
@@ -647,24 +647,36 @@ class FeatureValidator:
                 )
                 raise FeatureValidationError(error_msg)
 
-            # Check coding - must be uncompressed (NONE)
-            if self.feature_config.coding_type and self.feature_config.coding_type != CT.NONE:
-                error_msg = f'Minimal mode requires uncompressed GFF, got {self.feature_config.coding_type}. Use validation_level "trust" or "strict" to change compression.'
+            # Check coding - must match settings.coding_type
+            # Normalize both for comparison
+            input_coding = self.feature_config.coding_type
+            required_coding = coding  # This is already normalized from settings.coding_type
+
+            # Map None to CT.NONE for comparison
+            if input_coding is None:
+                input_coding = CT.NONE
+            if required_coding is None:
+                required_coding = CT.NONE
+
+            # Convert string to CT if needed
+            if isinstance(required_coding, str):
+                if required_coding in ('gz', 'gzip'):
+                    required_coding = CT.GZIP
+                elif required_coding in ('bz2', 'bzip2'):
+                    required_coding = CT.BZIP2
+
+            if input_coding != required_coding:
+                error_msg = f'Minimal mode requires input coding to match output coding. Input: {input_coding}, Required: {required_coding}. Use validation_level "trust" or "strict" to change compression.'
                 self.logger.add_validation_issue(
                     level='ERROR',
                     category='feature',
                     message=error_msg,
-                    details={'file': self.feature_config.filename, 'coding_type': str(self.feature_config.coding_type)}
+                    details={'file': self.feature_config.filename, 'input_coding': str(input_coding), 'required_coding': str(required_coding)}
                 )
                 raise FeatureValidationError(error_msg)
 
-            # Normalize output filename - always .gff extension
-            if self.settings.output_filename_suffix:
-                output_filename_minimal = f"{base_name}_{self.settings.output_filename_suffix}.gff"
-            else:
-                output_filename_minimal = f"{base_name}.gff"
-
-            output_path_minimal = output_dir / output_filename_minimal
+            # Use the output_filename already constructed (includes correct extension)
+            output_path_minimal = output_dir / output_filename
 
             # Copy file
             self.logger.debug(f"Copying {self.input_path} to {output_path_minimal}")
@@ -703,4 +715,4 @@ class FeatureValidator:
                 handle.write(line + '\n')
 
         self.logger.info(f"Output saved: {output_path}")
-        return
+        return output_path

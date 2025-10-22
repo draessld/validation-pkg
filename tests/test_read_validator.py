@@ -664,7 +664,7 @@ class TestReadValidatorValidationLevels:
 
     def test_strict_correct_file_passes(self, multi_read_fastq, output_dir):
         """Test strict mode with correct FASTQ file - should pass."""
-        settings = ReadValidator.Settings(validation_level='strict')
+        settings = ReadValidator.Settings(validation_level='strict', coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
@@ -705,8 +705,8 @@ class TestReadValidatorValidationLevels:
     # ===== Tests for TRUST validation level =====
 
     def test_trust_correct_file_passes(self, multi_read_fastq, output_dir):
-        """Test trust mode with correct FASTQ file - parses all, validates first 10."""
-        settings = ReadValidator.Settings(validation_level='trust')
+        """Test trust mode with correct FASTQ file - parses first 10, validates them, copies original file."""
+        settings = ReadValidator.Settings(validation_level='trust', coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
@@ -718,9 +718,9 @@ class TestReadValidatorValidationLevels:
         validator = ReadValidator(read_config, output_dir, settings)
         validator.validate()
 
-        # All 20 reads should be parsed (trust mode parses all)
-        assert len(validator.sequences) == 20
-        # Output file should exist with all reads (gzipped)
+        # Only first 10 reads should be parsed (trust mode parses only first 10)
+        assert len(validator.sequences) == 10
+        # Output file should exist with all reads copied (gzipped)
         output_files = list(output_dir.glob("*.fastq.gz"))
         assert len(output_files) == 1
 
@@ -748,7 +748,7 @@ class TestReadValidatorValidationLevels:
 
     def test_minimal_correct_file_passes(self, multi_read_fastq, output_dir):
         """Test minimal mode with correct file - should pass without validation."""
-        settings = ReadValidator.Settings(validation_level='minimal')
+        settings = ReadValidator.Settings(validation_level='minimal', coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
@@ -767,27 +767,28 @@ class TestReadValidatorValidationLevels:
         assert len(output_files) == 1
 
     def test_minimal_damaged_file_raises_error(self, damaged_fastq, output_dir):
-        """Test minimal mode with uncompressed file - should raise error."""
+        """Test minimal mode with uncompressed file - should raise error due to coding mismatch."""
         settings = ReadValidator.Settings(
             validation_level='minimal',
+            coding_type='gz',  # Require GZIP output
             allow_empty_id=False  # Ignored in minimal mode
         )
         read_config = ReadConfig(
             filename="damaged.fastq",
             filepath=damaged_fastq,
             ngs_type="illumina",
-            coding_type=CodingType.NONE,  # Uncompressed - not allowed in minimal mode
+            coding_type=CodingType.NONE,  # Uncompressed - doesn't match output coding
             detected_format=ReadFormat.FASTQ
         )
 
         validator = ReadValidator(read_config, output_dir, settings)
-        # Should raise error - minimal mode requires GZIP compression
-        with pytest.raises(ReadValidationError, match="Minimal mode requires GZIP"):
+        # Should raise error - minimal mode requires input coding to match output coding
+        with pytest.raises(ReadValidationError, match="input coding to match output coding"):
             validator.validate()
 
     def test_minimal_output_is_copy(self, multi_read_fastq, output_dir):
         """Test that minimal mode copies file as-is."""
-        settings = ReadValidator.Settings(validation_level='minimal')
+        settings = ReadValidator.Settings(validation_level='minimal', coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
@@ -819,7 +820,7 @@ class TestReadValidatorValidationLevels:
                 f.write("+\n")
                 f.write("IIIIIIIIIIIIIIIIIIII\n")
 
-        settings = ReadValidator.Settings(validation_level='trust')
+        settings = ReadValidator.Settings(validation_level='trust', coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=fastq_file,
@@ -831,7 +832,7 @@ class TestReadValidatorValidationLevels:
         validator = ReadValidator(read_config, output_dir, settings)
         validator.validate()
 
-        # All reads should be parsed
+        # All 10 reads should be parsed (trust mode parses first 10)
         assert len(validator.sequences) == 10
 
         # Output should be created
@@ -839,7 +840,7 @@ class TestReadValidatorValidationLevels:
         assert len(output_files) == 1
 
     def test_minimal_compressed_bz2_raises_error(self, temp_dir, output_dir):
-        """Test minimal mode with bzip2 compressed file - should raise error."""
+        """Test minimal mode with bzip2 compressed file - should raise error due to coding mismatch."""
         fastq_file = temp_dir / "reads.fastq.bz2"
         with bz2.open(fastq_file, "wt") as f:
             f.write("@read1\n")
@@ -847,7 +848,7 @@ class TestReadValidatorValidationLevels:
             f.write("+\n")
             f.write("IIIIIIIIIIIIIIIIIIII\n")
 
-        settings = ReadValidator.Settings(validation_level='minimal')
+        settings = ReadValidator.Settings(validation_level='minimal', coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.bz2",
             filepath=fastq_file,
@@ -858,8 +859,8 @@ class TestReadValidatorValidationLevels:
 
         validator = ReadValidator(read_config, output_dir, settings)
 
-        # Should raise error - minimal mode requires GZIP (not bz2)
-        with pytest.raises(ReadValidationError, match="Minimal mode requires GZIP"):
+        # Should raise error - minimal mode requires input coding to match output coding
+        with pytest.raises(ReadValidationError, match="input coding to match output coding"):
             validator.validate()
 
     # ===== Test for invalid validation level =====

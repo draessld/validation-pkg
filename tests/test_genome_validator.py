@@ -1211,8 +1211,8 @@ class TestGenomeValidatorValidationLevels:
 
         validator = GenomeValidator(genome_config, output_dir, settings)
 
-        # Should raise error - minimal mode doesn't support compressed files
-        with pytest.raises(GenomeValidationError, match="Minimal mode requires uncompressed FASTA"):
+        # Should raise error - minimal mode requires input coding to match output coding
+        with pytest.raises(GenomeValidationError, match="input coding to match output coding"):
             validator.validate()
 
     # ===== Test for invalid validation level =====

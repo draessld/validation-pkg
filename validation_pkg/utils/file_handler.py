@@ -176,19 +176,40 @@ def get_file_format(filepath: Union[str, Path]) -> str:
 def gz_to_bz2(gz_file:Path, bz2_file:Path):
 
     subprocess.run(
-        f"gzip -dc {gz_file} | bzip2 > {bz2_file}",
+        f"gzip -dc {gz_file} | bzip2 -c > {bz2_file}",
         shell=True, check=True
     )
 
 
 def bz2_to_gz(bz2_file:Path, gz_file:Path):
     subprocess.run(
-        f"bzip2 -dc {bz2_file} | gzip > {gz_file}",
+        f"bzip2 -dc {bz2_file} | gzip -c > {gz_file}",
         shell=True, check=True
     )
 
 def none_to_gz(none_file:Path, gz_file:Path):
     subprocess.run(
-        f"gzip {none_file} > {gz_file}",
+        f"gzip -c {none_file} > {gz_file}",
+        shell=True, check=True
+    )
+
+def gz_to_none(gz_file:Path, none_file:Path):
+    """Decompress gzip file to uncompressed file."""
+    subprocess.run(
+        f"gzip -dc {gz_file} > {none_file}",
+        shell=True, check=True
+    )
+
+def bz2_to_none(bz2_file:Path, none_file:Path):
+    """Decompress bzip2 file to uncompressed file."""
+    subprocess.run(
+        f"bzip2 -dc {bz2_file} > {none_file}",
+        shell=True, check=True
+    )
+
+def none_to_bz2(none_file:Path, bz2_file:Path):
+    """Compress uncompressed file to bzip2."""
+    subprocess.run(
+        f"bzip2 -c {none_file} > {bz2_file}",
         shell=True, check=True
     )
