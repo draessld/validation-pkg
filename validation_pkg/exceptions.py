@@ -1,21 +1,32 @@
 """
 Custom exceptions for the bioinformatics validation package.
 
+Provides a hierarchical exception system for type-specific error handling:
+
 Exception hierarchy:
     ValidationError (base)
-    ├── ConfigurationError
-    ├── FileNotFoundError
-    ├── FileFormatError
+    ├── ConfigurationError (config file issues)
+    ├── FileNotFoundError (missing files)
+    ├── FileFormatError (invalid file formats)
     │   ├── FastaFormatError
     │   ├── GenBankFormatError
     │   ├── BedFormatError
     │   ├── GffFormatError
-    │   └── FastqFormatError
-    ├── CompressionError
-    ├── GenomeValidationError
-    ├── FeatureValidationError
-    ├── ReadValidationError
-    └── InterFileValidationError
+    │   ├── FastqFormatError
+    │   └── BamFormatError
+    ├── CompressionError (decompression failures)
+    ├── GenomeValidationError (genome validation failures)
+    ├── FeatureValidationError (feature validation failures)
+    ├── ReadValidationError (read validation failures)
+    └── InterFileValidationError (inter-file consistency errors)
+
+Usage:
+    Catch ValidationError to handle all package-specific errors:
+
+    try:
+        validate_genome(config)
+    except ValidationError as e:
+        print(f"Validation failed: {e}")
 """
 
 

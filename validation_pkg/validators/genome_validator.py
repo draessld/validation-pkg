@@ -1,17 +1,28 @@
 """
 Genome file validator and processor.
 
-Handles FASTA and GenBank formats with compression support.
+This module provides comprehensive validation and processing for genome files in FASTA and GenBank
+formats. It handles decompression (gzip/bzip2), parsing using BioPython, validation of sequence
+structure, and various editing operations like plasmid splitting and sequence ID modification.
+
+Key Features:
+    - Multi-format support: FASTA and GenBank
+    - Compression handling: gzip, bzip2, and uncompressed files
+    - Three validation levels: strict (full validation), trust (fast validation), minimal (copy only)
+    - Plasmid handling: split plasmids to separate files or merge them
+    - Sequence filtering: by length, ID modification
+    - Parallel compression support: automatic detection of pigz/pbzip2
+
+Classes:
+    GenomeValidator: Main validator class for genome files
+    GenomeValidator.Settings: Configuration dataclass for validation behavior
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, IO
+from typing import Optional, List, IO
 from dataclasses import dataclass
 from Bio import SeqIO
-from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-import gzip
-import bz2
 import shutil
 
 from validation_pkg.logger import get_logger
@@ -29,15 +40,33 @@ from validation_pkg.utils.file_handler import open_compressed_writer
 
 class GenomeValidator:
     """
-    Validates and processes genome files (FASTA and GenBank formats).
+    Validates and processes genome files in FASTA and GenBank formats.
 
-    Workflow:
-    1. Detect and handle compression
-    2. Parse and validate using BioPython
-    3. Apply editing specifications
-    4. Convert to FASTA format
-    5. Compress if requested
-    6. Save to output directory
+    This validator provides three validation levels:
+        - 'strict': Parse and validate all sequences, apply all edits (slowest, most thorough)
+        - 'trust': Parse all sequences, validate only first one, apply all edits (~10-15x faster)
+        - 'minimal': No parsing/validation, direct file copy (fastest, requires FASTA format)
+
+    Processing Workflow:
+        1. Parse file using BioPython (format auto-detected by ConfigManager)
+        2. Validate sequence structure (IDs, lengths)
+        3. Apply edits: filter by length, add ID prefixes
+        4. Handle plasmids: split to separate files or merge
+        5. Convert to FASTA format (if input is GenBank)
+        6. Save with optional compression (supports pigz/pbzip2 for performance)
+
+    Attributes:
+        genome_config: GenomeConfig object with file path and format info
+        output_dir: Directory for output files
+        settings: Settings object controlling validation and processing behavior
+        sequences: List of parsed SeqRecord objects (populated during validation)
+
+    Example:
+        >>> from validation_pkg import ConfigManager, GenomeValidator
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = GenomeValidator.Settings(validation_level='trust', plasmid_split=True)
+        >>> validator = GenomeValidator(config.ref_genome, config.output_dir, settings)
+        >>> validator.validate()
     """
 
     @dataclass
@@ -86,9 +115,21 @@ class GenomeValidator:
         min_sequence_length: int = 100
 
         # Output format
-        coding_type: Optional[str] = None 
+        coding_type: Optional[str] = None
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
+
+        # Unified threads parameter (None = auto-detect)
+        # If specified, automatically splits between max_workers and compression_threads
+        threads: Optional[int] = None
+
+        # Compression threads (None = auto-detect)
+        # Explicit setting overrides thread splitting from 'threads'
+        compression_threads: Optional[int] = None
+
+        # Parallel processing (None = no parallelization, int = max workers)
+        # Explicit setting overrides thread splitting from 'threads'
+        max_workers: Optional[int] = None
 
         def __post_init__(self):
             """Validate settings after initialization."""
@@ -361,7 +402,7 @@ class GenomeValidator:
         Applies the following edits (if enabled in settings):
         - Remove short sequences (min_sequence_length)
         - Add sequence prefix (replace_id_with)
-        - Check for duplicate IDs (check_duplicate_ids)
+        - Handle plasmid sequences (split or merge)
 
         Behavior depends on validation_level:
         - 'strict': Apply all edits
@@ -396,26 +437,22 @@ class GenomeValidator:
                 return
 
         # 2. Add sequence prefix
-        #   TODO: before or after plasmid handling? - what is plasmid file correspond to ref genome, where the id is changes??
-        #   TODO: plasmid does not require same ID
-        #   TODO: _ref_plasmid mergnout s _ref_plasmid ze zvlastniho souboru.
         if self.settings.replace_id_with:
             prefix = self.settings.replace_id_with
             for record in self.sequences:
-                # Add prefix to sequence ID
+                # Store original ID in description
                 record.description = f"{record.id}"
                 record.id = f"{prefix}"
             self.logger.debug(f"Added prefix '{prefix}' to all sequence IDs")
 
         # 3. Handle plasmid sequences
-        # select main sequence
         if self.settings.is_plasmid:
             # Treat all sequences as plasmids (no main chromosome)
             self._handle_plasmids(self.sequences)
             self.sequences = []
         elif self.settings.plasmid_split or self.settings.plasmids_to_one:
             # Only select main sequence if we're actually doing plasmid handling
-            self.main_sequence,plasmid_sequences = self._select_main_sequence(self.sequences)
+            self.main_sequence, plasmid_sequences = self._select_main_sequence(self.sequences)
             self._handle_plasmids(plasmid_sequences)
             self.sequences = [self.main_sequence]
         # else: keep all sequences in main output file (default behavior)
@@ -452,7 +489,18 @@ class GenomeValidator:
 
         return main_sequence, plasmid_sequences
 
-    def _handle_plasmids(self, plasmid_sequences:List[SeqRecord]):
+    def _handle_plasmids(self, plasmid_sequences: List[SeqRecord]) -> None:
+        """
+        Handle plasmid sequences according to settings.
+
+        Args:
+            plasmid_sequences: List of SeqRecord objects representing plasmids
+
+        Behavior based on settings:
+            - plasmid_split=True: Save each plasmid to separate file
+            - plasmids_to_one=True: Merge all plasmids into one file
+            - Both False: Keep plasmids in main output file (no action needed)
+        """
         if len(plasmid_sequences) == 0:
             return
 
@@ -474,7 +522,7 @@ class GenomeValidator:
                 f"Processing plasmid file: merging {len(plasmid_sequences)} plasmid(s) "
                 f"into one file"
             )
-            self._save_plasmid_file(plasmid_sequences,"")
+            self._save_plasmid_file(plasmid_sequences, "")
 
         else:
             # Keep all sequences in main output file
@@ -532,7 +580,7 @@ class GenomeValidator:
             coding_enum = CT.BZIP2
 
         # Use optimized compression writer
-        with open_compressed_writer(plasmid_path, coding_enum) as handle:
+        with open_compressed_writer(plasmid_path, coding_enum, threads=self.settings.compression_threads) as handle:
             SeqIO.write(plasmid_sequences, handle, 'fasta')
 
         self.logger.info(f"Plasmid sequences saved: {plasmid_path}")
@@ -676,7 +724,7 @@ class GenomeValidator:
             coding_enum = CT.BZIP2
 
         # Use optimized compression writer
-        with open_compressed_writer(output_path, coding_enum) as handle:
+        with open_compressed_writer(output_path, coding_enum, threads=self.settings.compression_threads) as handle:
             SeqIO.write(self.sequences, handle, 'fasta')
 
         self.logger.info(f"Output saved: {output_path}")

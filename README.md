@@ -12,7 +12,6 @@ A comprehensive validation package for genomic data files used in bioinformatics
 - [Configuration](#configuration)
 - [Usage Patterns](#usage-patterns)
 - [API Reference](#api-reference)
-- [Command Line Interface](#command-line-interface)
 - [Supported File Formats](#supported-file-formats)
 - [Performance Optimization](#performance-optimization)
 - [Error Handling](#error-handling)
@@ -31,10 +30,10 @@ A comprehensive validation package for genomic data files used in bioinformatics
 - **Format conversion:** GenBank to FASTA, BAM to FASTQ, BED to GFF
 - **Plasmid handling:** Automatic plasmid splitting for bacterial genomes
 - **Directory-based reads:** Load multiple read files from directories with inherited configuration
-- **Flexible API:** Multiple usage patterns from simple to advanced
+- **Parallel processing:** Multi-file and multi-threaded compression for performance
+- **Flexible API:** Functional API and direct validator access
 - **Configuration-driven:** JSON-based configuration for batch processing
 - **Detailed reporting:** Structured validation reports with statistics
-- **CLI support:** Command-line interface for automation
 
 ---
 
@@ -51,19 +50,53 @@ pip install -e .
 python -m validation_pkg validate config.json
 ```
 
+### Optional Dependencies (Recommended)
+
+For significantly faster compression/decompression of large genomic files, install parallel compression tools:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install pigz pbzip2
+
+# macOS (via Homebrew)
+brew install pigz pbzip2
+
+# From source (if package manager not available)
+# pigz: https://zlib.net/pigz/
+# pbzip2: https://launchpad.net/pbzip2
+```
+
+**Performance improvement with parallel tools:**
+- **pigz** (parallel gzip): 3-4x faster than standard gzip
+- **pbzip2** (parallel bzip2): 2-3x faster than standard bzip2
+- Automatically detected and used when available
+- Graceful fallback to standard gzip/bzip2 if not installed
+
+The package works perfectly fine without these tools, but installing them is highly recommended for production workloads with large files (>1GB).
+
 ### Simple Usage
 
 ```python
-from validation_pkg import ValidationCoordinator
+from validation_pkg import ConfigManager, validate_genome, validate_reads, validate_feature
 
-# Validate all files in config
-coordinator = ValidationCoordinator("config.json")
-report = coordinator.validate_all()
+# Load configuration
+config = ConfigManager.load("config.json")
 
-if report.passed:
-    print("✓ All validations passed!")
-else:
-    print(f"✗ Found {report.errors} error(s)")
+# Validate genome files
+if config.ref_genome:
+    validate_genome(config.ref_genome, config.output_dir)
+if config.mod_genome:
+    validate_genome(config.mod_genome, config.output_dir)
+
+# Validate all read files
+if config.reads:
+    validate_reads(config.reads, config.output_dir)
+
+# Validate feature files
+if config.ref_feature:
+    validate_feature(config.ref_feature, config.output_dir)
+
+print("✓ All validations complete!")
 ```
 
 ---
@@ -211,9 +244,27 @@ All files in `reads_dir/` will be loaded and assigned `ngs_type: "ont"`.
       "ngs_type": "ont",
       "validation_level": "strict"
     }
-  ]
+  ],
+  "ref_feature_filename": {
+    "filename": "annotations.gff",
+    "validation_level": "trust",
+    "sort_by_position": true
+  }
 }
 ```
+
+**How config-level settings work:**
+- You can specify **any** validator setting directly in config.json alongside file paths
+- Settings are automatically applied when using the functional API (`validate_genome()`, `validate_read()`, `validate_feature()`)
+- If you provide settings in code, they **override** config settings (code takes precedence)
+- Directory-based reads inherit all settings from the directory entry
+
+**Available settings:**
+- **Genome files**: `validation_level`, `plasmid_split`, `min_sequence_length`, `replace_id_with`, etc.
+- **Read files**: `validation_level`, `check_invalid_chars`, `allow_duplicate_ids`, `keep_bam`, etc.
+- **Feature files**: `validation_level`, `sort_by_position`, `check_coordinates`, etc.
+
+See each validator's Settings class for the full list of available options.
 
 ---
 
@@ -223,34 +274,30 @@ The package supports multiple usage patterns to fit different needs:
 
 ### Pattern 1: Simple Workflow (Recommended)
 
-Use `ValidationCoordinator` for automatic workflow orchestration:
+Use the functional API for straightforward validation:
 
 ```python
-from validation_pkg import ValidationCoordinator
+from validation_pkg import ConfigManager, validate_genome, validate_reads, validate_feature
 
-coordinator = ValidationCoordinator("config.json")
-report = coordinator.validate_all()
-print(report.summary())
+# Load configuration
+config = ConfigManager.load("config.json")
+
+# Validate all genome files
+if config.ref_genome:
+    validate_genome(config.ref_genome, config.output_dir)
+if config.mod_genome:
+    validate_genome(config.mod_genome, config.output_dir)
+
+# Validate all read files
+if config.reads:
+    validate_reads(config.reads, config.output_dir)
+
+# Validate feature files
+if config.ref_feature:
+    validate_feature(config.ref_feature, config.output_dir)
 ```
 
-### Pattern 2: Selective Validation
-
-Validate only specific file types:
-
-```python
-coordinator = ValidationCoordinator("config.json")
-
-# Validate only genomes
-genome_report = coordinator.validate_genomes()
-
-# Validate only reads
-reads_report = coordinator.validate_reads()
-
-# Validate only features
-features_report = coordinator.validate_features()
-```
-
-### Pattern 3: Custom Settings (Functional API)
+### Pattern 2: Custom Settings (Functional API)
 
 Use custom settings for each file type:
 
@@ -312,13 +359,24 @@ print(config.ref_genome.filename)
 print(len(config.reads))
 ```
 
-#### `ValidationCoordinator`
+#### Functional API
 
-Orchestrate complete validation workflows:
+High-level validation functions:
 
 ```python
-coordinator = ValidationCoordinator("config.json")
-report = coordinator.validate_all()
+from validation_pkg import validate_genome, validate_read, validate_reads, validate_feature
+
+# Single genome file
+validate_genome(genome_config, output_dir, settings)
+
+# Single read file
+validate_read(read_config, output_dir, settings)
+
+# Multiple read files (with optional parallel processing)
+validate_reads(read_configs, output_dir, settings)
+
+# Single feature file
+validate_feature(feature_config, output_dir, settings)
 ```
 
 #### Validator Classes

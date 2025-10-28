@@ -1,12 +1,22 @@
 """
-Configuration and ConfigManager classes for bioinformatics file validation.
+Configuration management for bioinformatics file validation.
 
-Contains:
-- GenomeConfig, ReadConfig, FeatureConfig: Dataclasses for file configurations
-- Config: Main configuration container
-- ConfigManager: Configuration file parser and validator
+This module provides classes and utilities for loading and validating JSON configuration
+files that specify input files, output directories, and validation settings.
 
-Note: ConfigManager class may be renamed to ConfigManager in future.
+Main Components:
+    - GenomeConfig: Configuration for genome/plasmid files
+    - ReadConfig: Configuration for sequencing read files
+    - FeatureConfig: Configuration for feature annotation files
+    - Config: Main configuration container
+    - ConfigManager: JSON parser and validator
+
+Key Features:
+    - Automatic path resolution relative to config file location
+    - Compression and format detection
+    - Directory-based read loading
+    - Validator-specific settings extraction from config
+    - Thread count configuration for parallel compression
 """
 
 import json
@@ -14,7 +24,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Type, Tuple
 from dataclasses import dataclass
 
-# Import logging and exceptions
 from validation_pkg.utils.formats import CodingType, GenomeFormat, ReadFormat, FeatureFormat
 from validation_pkg.logger import get_logger
 from validation_pkg.exceptions import (
@@ -22,85 +31,149 @@ from validation_pkg.exceptions import (
     FileNotFoundError as ValidationFileNotFoundError
 )
 
-#   TODO: rescrict user of the package to call anything else except ConfigManager.load()
-#   TODO[OPTIONAL]: rename filename to file?
-
 @dataclass
 class GenomeConfig:
-    """Configuration for genome or plasmid files."""
-    filename: str  # Original filename
-    filepath: Path  # Absolute resolved path
-    coding_type: CodingType = None  # Coding type applied on file
-    detected_format: GenomeFormat = None  # Genome file format
-    output_dir: Path = None  # Output folder base - heritage from config
-    
-    # Store any additional keys from config
+    """
+    Configuration for genome or plasmid files.
+
+    Attributes:
+        filename: Original filename (relative to config)
+        filepath: Absolute resolved path
+        coding_type: Compression format (GZIP, BZIP2, or NONE)
+        detected_format: File format (FASTA or GENBANK)
+        output_dir: Base output directory from config
+        extra: Additional non-validator fields from config
+        settings_dict: Validator-specific settings from config
+    """
+    filename: str
+    filepath: Path
+    coding_type: CodingType = None
+    detected_format: GenomeFormat = None
+    output_dir: Path = None
     extra: Dict[str, Any] = None
-    
+    settings_dict: Dict[str, Any] = None
+
     def __post_init__(self):
         if self.extra is None:
             self.extra = {}
+        if self.settings_dict is None:
+            self.settings_dict = {}
 
 @dataclass
 class ReadConfig:
-    """Configuration for read files."""
-    filename: str  # Original filename
-    filepath: Path  # Absolute resolved path
-    ngs_type: str = None  # "illumina", "ont", "pacbio"
-    coding_type: CodingType = None # Coding type applied on file
-    detected_format: ReadFormat = None  # Read file format
-    output_dir: Path = None  # Output folder base - heritage from config
+    """
+    Configuration for sequencing read files.
 
-    # Store any additional keys from config
+    Attributes:
+        filename: Original filename (relative to config)
+        filepath: Absolute resolved path
+        ngs_type: Sequencing platform ("illumina", "ont", or "pacbio")
+        coding_type: Compression format (GZIP, BZIP2, or NONE)
+        detected_format: File format (FASTQ or BAM)
+        output_dir: Base output directory from config
+        extra: Additional non-validator fields from config
+        settings_dict: Validator-specific settings from config
+    """
+    filename: str
+    filepath: Path
+    ngs_type: str = None
+    coding_type: CodingType = None
+    detected_format: ReadFormat = None
+    output_dir: Path = None
     extra: Dict[str, Any] = None
+    settings_dict: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.ngs_type not in ["illumina", "ont", "pacbio"]:
             raise ValueError(f"Invalid ngs_type: {self.ngs_type}")
         if self.extra is None:
             self.extra = {}
+        if self.settings_dict is None:
+            self.settings_dict = {}
 
 @dataclass
 class FeatureConfig:
-    """Configuration for feature files."""
-    filename: str  # Original relative filename
-    filepath: Path  # Absolute resolved path
-    coding_type: CodingType = None # Coding type applied on file
-    detected_format: FeatureFormat = None  # Genome file format
-    output_dir: Path = None  # Output folder base - heritage from config
-    
-    # Store any additional keys from config
+    """
+    Configuration for feature annotation files.
+
+    Attributes:
+        filename: Original filename (relative to config)
+        filepath: Absolute resolved path
+        coding_type: Compression format (GZIP, BZIP2, or NONE)
+        detected_format: File format (GFF, GTF, or BED)
+        output_dir: Base output directory from config
+        extra: Additional non-validator fields from config
+        settings_dict: Validator-specific settings from config
+    """
+    filename: str
+    filepath: Path
+    coding_type: CodingType = None
+    detected_format: FeatureFormat = None
+    output_dir: Path = None
     extra: Dict[str, Any] = None
-    
+    settings_dict: Dict[str, Any] = None
+
     def __post_init__(self):
         if self.extra is None:
             self.extra = {}
+        if self.settings_dict is None:
+            self.settings_dict = {}
 
 
 class Config:
     """
-    Data holder for configuration.
-    Stores validated configuration data without business logic.
+    Main configuration container for validation workflow.
+
+    Stores validated configuration data loaded from JSON file, including file paths,
+    compression/format details, and options. Provides helper methods for path resolution.
+
+    Attributes:
+        ref_genome: Reference genome configuration (required)
+        mod_genome: Modified genome configuration (required)
+        reads: List of read file configurations (required, non-empty)
+        ref_plasmid: Reference plasmid configuration (optional)
+        mod_plasmid: Modified plasmid configuration (optional)
+        ref_feature: Reference feature configuration (optional)
+        mod_feature: Modified feature configuration (optional)
+        options: Additional options (e.g., thread count)
+        config_dir: Directory containing config file
+        output_dir: Base output directory for validated files
     """
-    
+
     def __init__(self):
         # Required fields
         self.ref_genome: Optional[GenomeConfig] = None
         self.mod_genome: Optional[GenomeConfig] = None
         self.reads: List[ReadConfig] = []
-        
+
         # Optional fields
         self.ref_plasmid: Optional[GenomeConfig] = None
         self.mod_plasmid: Optional[GenomeConfig] = None
         self.ref_feature: Optional[FeatureConfig] = None
         self.mod_feature: Optional[FeatureConfig] = None
-        self.options: Dict[str, Any] = {}   #   TODO: implement validation_lvl mode and threads to run
-        
-        # Store config directory for relative path resolution
+        self.options: Dict[str, Any] = {}
+
+        # Internal fields
         self.config_dir: Optional[Path] = None
-        
-        # Output directory (set to config_dir.parent / "valid")
         self.output_dir: Optional[Path] = None
+
+    def get_threads(self) -> Optional[int]:
+        """
+        Get thread count from options, or None for auto-detection.
+
+        Returns:
+            Thread count if specified in options, None for auto-detection
+
+        Example:
+            >>> config = Config()
+            >>> config.options = {'threads': 4}
+            >>> config.get_threads()
+            4
+            >>> config.options = {}
+            >>> config.get_threads()
+            None
+        """
+        return self.options.get('threads')
     
     def resolve_path(self, relative_path: str) -> Path:
         """
@@ -132,8 +205,14 @@ class Config:
 
 class ConfigManager:
     """
-    Reads and validates configuration files.
-    Responsible for parsing JSON and validating keys/values.
+    Configuration file parser and validator.
+
+    Responsible for loading JSON configuration files, validating their structure,
+    resolving file paths, detecting formats/compression, and extracting validator
+    settings.
+
+    Primary usage:
+        config = ConfigManager.load("config.json")
     """
     
     @staticmethod
@@ -245,17 +324,34 @@ class ConfigManager:
     @staticmethod
     def _parse_genome_config(value: Any, field_name: str, config_dir: Path, output_dir: Path) -> GenomeConfig:
         """
-        Parse a genome condiguration.
+        Parse a genome configuration entry.
+
+        Args:
+            value: Config value (dict with 'filename' or string)
+            field_name: Name of field for error messages
+            config_dir: Base directory for resolving relative paths
+            output_dir: Output directory for validated files
+
+        Returns:
+            GenomeConfig with resolved paths and detected format/compression
         """
+        from validation_pkg.validators.genome_validator import GenomeValidator
         logger = get_logger()
 
         # Parse filename and extra fields using unified utility
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
 
-        # Warn about extra fields - we are not able to proccess them yet
-        if extra:
+        # Extract validator-specific settings from extra fields
+        settings_dict, remaining_extra = ConfigManager._extract_validator_settings(extra, GenomeValidator)
+
+        # Log extracted settings
+        if settings_dict:
+            logger.debug(f"{field_name}: Extracted validator settings: {list(settings_dict.keys())}")
+
+        # Warn about remaining extra fields that are not validator settings
+        if remaining_extra:
             logger.warning(
-                f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
+                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
             )
 
         # Resolve absolute path
@@ -264,7 +360,7 @@ class ConfigManager:
         if not filepath.exists():
             raise ValidationFileNotFoundError(
                 f"The following file was not found: {filepath}\n")
-        
+
         # Detect compression and format using unified utilities
         coding_type = ConfigManager._detect_compression_type(filepath)
         detected_format = ConfigManager._detect_file_format(filepath, GenomeFormat)
@@ -274,7 +370,8 @@ class ConfigManager:
             filepath=filepath,
             coding_type=coding_type,
             detected_format=detected_format,
-            extra=extra,
+            extra=remaining_extra,
+            settings_dict=settings_dict,
             output_dir=output_dir
         )
     
@@ -342,14 +439,43 @@ class ConfigManager:
                 raise ValueError(f"Invalid reads[{idx}]: {e}")
     
     @staticmethod
-    def _parse_read_config(value: Any, field_name: str, config_dir: Path, output_dir: Path) -> GenomeConfig:
+    def _parse_read_config(value: Any, field_name: str, config_dir: Path, output_dir: Path) -> ReadConfig:
         """
-        Parse a read condiguration.
+        Parse a read configuration entry.
+
+        Args:
+            value: Config value (dict with 'filename' and 'ngs_type' or string)
+            field_name: Name of field for error messages
+            config_dir: Base directory for resolving relative paths
+            output_dir: Output directory for validated files
+
+        Returns:
+            ReadConfig with resolved paths and detected format/compression
         """
+        from validation_pkg.validators.read_validator import ReadValidator
         logger = get_logger()
 
         # Parse filename and extra fields using unified utility
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
+
+        # Extract ngs_type first (it's a required field, not a validator setting)
+        ngs_type = extra.pop('ngs_type', 'illumina')
+
+        if not ngs_type:
+            raise ValueError("Missing required 'ngs_type'")
+
+        # Extract validator-specific settings from remaining extra fields
+        settings_dict, remaining_extra = ConfigManager._extract_validator_settings(extra, ReadValidator)
+
+        # Log extracted settings
+        if settings_dict:
+            logger.debug(f"{field_name}: Extracted validator settings: {list(settings_dict.keys())}")
+
+        # Warn about remaining extra fields that are not validator settings
+        if remaining_extra:
+            logger.warning(
+                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
+            )
 
         # Resolve absolute path
         filepath = config_dir / filename
@@ -357,16 +483,11 @@ class ConfigManager:
         if not filepath.exists():
             raise ValidationFileNotFoundError(
                 f"The following file was not found: {filepath}\n")
-        
+
         # Detect compression and format using unified utilities
         coding_type = ConfigManager._detect_compression_type(filepath)
         detected_format = ConfigManager._detect_file_format(filepath, ReadFormat)
 
-        ngs_type = extra.get('ngs_type', 'illumina')
-
-        if not ngs_type:
-            raise ValueError("Missing required 'ngs_type'")
-        
         return ReadConfig(
             filename=filepath.name,
             filepath=filepath,
@@ -374,7 +495,8 @@ class ConfigManager:
             coding_type=coding_type,
             detected_format=detected_format,
             output_dir=output_dir,
-            extra=extra
+            extra=remaining_extra,
+            settings_dict=settings_dict
         )
 
     @staticmethod
@@ -408,15 +530,23 @@ class ConfigManager:
         Raises:
             ValueError: If value format is invalid
         """
+        from validation_pkg.validators.feature_validator import FeatureValidator
         logger = get_logger()
 
         # Parse filename and extra fields using unified utility
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
 
-        # Warn about extra fields
-        if extra:
+        # Extract validator-specific settings from extra fields
+        settings_dict, remaining_extra = ConfigManager._extract_validator_settings(extra, FeatureValidator)
+
+        # Log extracted settings
+        if settings_dict:
+            logger.debug(f"{field_name}: Extracted validator settings: {list(settings_dict.keys())}")
+
+        # Warn about remaining extra fields that are not validator settings
+        if remaining_extra:
             logger.warning(
-                f"{field_name}: Found extra fields that will be ignored: {list(extra.keys())}"
+                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
             )
 
         # Resolve absolute path and file existence
@@ -424,7 +554,7 @@ class ConfigManager:
         if not filepath.exists():
             raise ValidationFileNotFoundError(
                 f"The following file was not found: {filepath}\n")
-        
+
         # Detect compression and format using unified utilities
         coding_type = ConfigManager._detect_compression_type(filepath)
         detected_format = ConfigManager._detect_file_format(filepath, FeatureFormat)
@@ -435,7 +565,8 @@ class ConfigManager:
             coding_type=coding_type,
             detected_format=detected_format,
             output_dir=output_dir,
-            extra=extra
+            extra=remaining_extra,
+            settings_dict=settings_dict
         )
         
     @staticmethod
@@ -443,12 +574,108 @@ class ConfigManager:
         """
         Parse optional configuration options.
 
-        Note: Options functionality not yet fully implemented.
-        Reserved for future configuration extensions.
+        Supported options:
+        - threads: Number of threads for parallel compression (positive integer)
+
+        Args:
+            data: Configuration dictionary
+            config: Config object to update
+
+        Raises:
+            ValueError: If threads is invalid (not positive integer)
         """
-        if 'options' in data:
-            config.options = data['options']
-    
+        logger = get_logger()
+
+        if 'options' not in data:
+            logger.debug("No options specified in config - using defaults")
+            return
+
+        options = data['options']
+
+        if not isinstance(options, dict):
+            raise ValueError("'options' must be a dictionary")
+
+        # Parse threads option
+        if 'threads' in options:
+            threads = options['threads']
+
+            # Allow null/None to mean auto-detect
+            if threads is None:
+                logger.info("Thread count: auto-detect (null specified)")
+                config.options['threads'] = None
+            elif isinstance(threads, int):
+                # Validate positive integer
+                if threads <= 0:
+                    raise ValueError(f"'threads' must be a positive integer, got {threads}")
+
+                # Warn if excessive (diminishing returns beyond 16)
+                if threads > 16:
+                    logger.warning(
+                        f"Thread count {threads} is high - diminishing returns beyond 16 threads. "
+                        f"Consider using 4-8 threads for optimal performance."
+                    )
+
+                logger.info(f"Using {threads} threads for parallel compression")
+                config.options['threads'] = threads
+            else:
+                raise ValueError(
+                    f"'threads' must be an integer or null, got {type(threads).__name__}: {threads}"
+                )
+        else:
+            logger.info("Thread count: auto-detect (not specified)")
+
+        # Store any other options for future use
+        for key, value in options.items():
+            if key not in ['threads']:
+                config.options[key] = value
+                logger.debug(f"Stored option '{key}': {value}")
+
+    @staticmethod
+    def _extract_validator_settings(
+        extra: Dict[str, Any],
+        validator_class: Type
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Extract validator-specific settings from config extra fields.
+
+        This method separates settings that belong to a validator's Settings class
+        from other config fields. It uses the validator's Settings class field names
+        to determine which keys are valid validator settings.
+
+        Args:
+            extra: Dictionary of extra fields from config.json
+            validator_class: Validator class (GenomeValidator, ReadValidator, or FeatureValidator)
+
+        Returns:
+            Tuple of (settings_dict, remaining_extra):
+                - settings_dict: Dict with valid validator settings
+                - remaining_extra: Dict with non-validator fields
+
+        Example:
+            >>> extra = {'validation_level': 'trust', 'ngs_type': 'illumina', 'custom_field': 'value'}
+            >>> settings, remaining = _extract_validator_settings(extra, ReadValidator)
+            >>> settings
+            {'validation_level': 'trust'}
+            >>> remaining
+            {'ngs_type': 'illumina', 'custom_field': 'value'}
+        """
+        from dataclasses import fields as dataclass_fields
+
+        # Get valid field names from the validator's Settings class
+        valid_settings = {f.name for f in dataclass_fields(validator_class.Settings)}
+
+        # Separate validator settings from other fields
+        settings_dict = {}
+        remaining_extra = {}
+
+        for key, value in extra.items():
+            if key in valid_settings:
+                settings_dict[key] = value
+            else:
+                remaining_extra[key] = value
+
+        return settings_dict, remaining_extra
+
     @staticmethod
     def _setup_output_directory(config: Config):
         """

@@ -1,14 +1,29 @@
 """
 Feature file validator and processor.
 
-Handles GFF, GTF, and BED formats with compression support.
+This module provides comprehensive validation and processing for genomic feature annotation files
+in GFF, GTF, and BED formats. It handles parsing, coordinate validation, format conversion, and
+various editing operations for genomic annotations.
+
+Key Features:
+    - Multi-format support: GFF, GTF, and BED
+    - Compression handling: gzip, bzip2, and uncompressed files
+    - Three validation levels: strict (full validation), trust (fast validation), minimal (copy only)
+    - Coordinate validation: start < end, no negative coordinates
+    - BED to GFF conversion (0-based to 1-based coordinate system)
+    - Feature sorting by genomic position
+    - Sequence ID replacement with original tracking
+    - Parallel compression support: automatic detection of pigz/pbzip2
+
+Classes:
+    Feature: Data container for genomic feature information
+    FeatureValidator: Main validator class for feature annotation files
+    FeatureValidator.Settings: Configuration dataclass for validation behavior
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, IO
+from typing import Optional, Dict, List, IO
 from dataclasses import dataclass
-import gzip
-import bz2
 import shutil
 
 from validation_pkg.logger import get_logger
@@ -26,7 +41,26 @@ from validation_pkg.utils.file_handler import open_compressed_writer
 
 @dataclass
 class Feature:
-    """Represents a genomic feature (generic container for GFF/BED data)."""
+    """
+    Represents a genomic feature (generic container for GFF/BED data).
+
+    This class stores feature annotation data in a format-agnostic way,
+    allowing seamless conversion between GFF and BED formats.
+
+    Attributes:
+        seqname: Sequence/chromosome name (e.g., 'chr1', 'contig_1')
+        start: Start position (coordinate system depends on source format)
+        end: End position (coordinate system depends on source format)
+        feature_type: Feature type (e.g., 'gene', 'exon', 'CDS')
+        score: Feature score (often '.' for no score)
+        strand: Strand orientation ('+', '-', or '.')
+        source: Source/program that generated the feature
+        frame: Reading frame for CDS features (0, 1, 2, or '.')
+        attributes: Semicolon-separated attribute string (GFF3 format)
+
+    Properties:
+        length: Calculated feature length (end - start)
+    """
     seqname: str
     start: int
     end: int
@@ -39,21 +73,50 @@ class Feature:
 
     @property
     def length(self) -> int:
-        """Calculate feature length."""
+        """
+        Calculate feature length in base pairs.
+
+        Returns:
+            Feature length (end - start)
+        """
         return self.end - self.start
 
 
 class FeatureValidator:
     """
-    Validates and processes feature annotation files (GFF, GTF, BED formats).
+    Validates and processes genomic feature annotation files in GFF, GTF, and BED formats.
 
-    Workflow:
-    1. Detect and handle compression
-    2. Parse features from file
-    3. Validate feature coordinates and structure
-    4. Apply editing specifications (sort, replace IDs)
-    6. Convert to GFF format (if needed)
-    7. Save to output directory
+    This validator provides three validation levels:
+        - 'strict': Parse and validate all features, apply all edits (most thorough)
+        - 'trust': Parse all features, validate only first 10, apply all edits (faster)
+        - 'minimal': No parsing/validation, direct file copy (fastest, requires GFF format)
+
+    Processing Workflow:
+        1. Parse features from file (format auto-detected by ConfigManager)
+        2. Validate coordinates: start < end, no negative values, no zero-length
+        3. Apply edits: sort by position, replace sequence IDs
+        4. Convert BED to GFF format (0-based → 1-based coordinates)
+        5. Save as GFF3 with optional compression
+
+    Key Features:
+        - Coordinate system conversion: BED (0-based, half-open) → GFF (1-based, closed)
+        - Feature sorting by genomic position (seqname, start, end)
+        - Sequence ID replacement with original tracking in attributes
+        - GFF3 attribute parsing and reconstruction
+        - Graceful handling of malformed lines (logs warnings, continues parsing)
+
+    Attributes:
+        feature_config: FeatureConfig object with file path and format info
+        output_dir: Directory for output files
+        settings: Settings object controlling validation and processing behavior
+        features: List of parsed Feature objects (populated during validation)
+
+    Example:
+        >>> from validation_pkg import ConfigManager, FeatureValidator
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = FeatureValidator.Settings(sort_by_position=True, replace_id_with='chr1')
+        >>> validator = FeatureValidator(config.ref_feature, config.output_dir, settings)
+        >>> validator.validate()
     """
 
     @dataclass
@@ -101,6 +164,18 @@ class FeatureValidator:
         coding_type: Optional[str] = None
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
+
+        # Unified threads parameter (None = auto-detect)
+        # If specified, automatically splits between max_workers and compression_threads
+        threads: Optional[int] = None
+
+        # Compression threads (None = auto-detect)
+        # Explicit setting overrides thread splitting from 'threads'
+        compression_threads: Optional[int] = None
+
+        # Parallel processing (None = no parallelization, int = max workers)
+        # Explicit setting overrides thread splitting from 'threads'
+        max_workers: Optional[int] = None
 
 
     def __init__(self, feature_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
@@ -267,11 +342,27 @@ class FeatureValidator:
             raise exception_class(error_msg) from e
 
     def _normalize_strand(self, strand: str) -> str:
-        """Normalize strand value to +, -, or ."""
+        """
+        Normalize strand value to valid GFF3 format.
+
+        Args:
+            strand: Raw strand value from input file
+
+        Returns:
+            Normalized strand ('+', '-', or '.' for unknown)
+        """
         return strand if strand in ['+', '-', '.'] else '.'
 
     def _skip_line(self, line: str) -> bool:
-        """Check if line should be skipped (empty or comment)."""
+        """
+        Check if line should be skipped during parsing.
+
+        Args:
+            line: Input line to check
+
+        Returns:
+            True if line is empty or a comment (starts with '#')
+        """
         return not line or line.startswith('#')
 
     def _parse_gff(self, handle) -> List[Feature]:
@@ -413,7 +504,21 @@ class FeatureValidator:
         self.logger.debug("✓ Feature validation passed")
 
     def _validate_coordinates(self, feature: Feature, idx: int) -> None:
-        """Validate feature coordinates."""
+        """
+        Validate feature genomic coordinates.
+
+        Performs three checks:
+            1. Start must be less than or equal to end
+            2. No negative coordinates allowed
+            3. No zero-length features (start == end)
+
+        Args:
+            feature: Feature object to validate
+            idx: Feature index (for error reporting)
+
+        Raises:
+            FeatureValidationError: If any validation check fails
+        """
         if feature.start > feature.end:
             error_message = f"Feature has start > end: {feature.seqname}:{feature.start}-{feature.end}"
             self.logger.add_validation_issue(
@@ -574,7 +679,19 @@ class FeatureValidator:
         self.logger.debug(f"✓ Edits applied, {len(self.features)} feature(s) remaining")
 
     def _convert_to_gff(self) -> None:
-        """Convert features to GFF format (if needed and requested)."""
+        """
+        Convert features to GFF format if needed.
+
+        BED and GFF use different coordinate systems:
+            - BED: 0-based, half-open [start, end)
+            - GFF: 1-based, closed [start, end]
+
+        Conversion: BED [start, end) → GFF [start+1, end]
+
+        Example:
+            BED: chr1 100 200 (covers positions 100-199 in 0-based)
+            GFF: chr1 . . 101 200 (covers positions 101-200 in 1-based)
+        """
         if self.feature_config.detected_format == FeatureFormat.GFF:
             self.logger.debug("Keeping GFF format")
             return
@@ -698,7 +815,7 @@ class FeatureValidator:
             coding_enum = CT.BZIP2
 
         # Use optimized compression writer
-        with open_compressed_writer(output_path, coding_enum) as handle:
+        with open_compressed_writer(output_path, coding_enum, threads=self.settings.compression_threads) as handle:
             # Write GFF header
             handle.write("##gff-version 3\n")
 

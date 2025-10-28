@@ -1,0 +1,53 @@
+{
+  "ref_genome_filename": {
+    "filename": "genome.fasta",
+    "validation_level": "trust",
+    "min_sequence_length": 100,
+    "plasmid_split": false
+  },
+  "mod_genome_filename": {
+    "filename": "genome.fa.gz",
+    "validation_level": "strict"
+  },
+  "ref_plasmid_filename": {
+    "filename": "genome.gbk.bz2",
+    "validation_level": "minimal"
+  },
+  "reads": [
+    {
+      "filename": "read.fastq",
+      "ngs_type": "illumina",
+      "validation_level": "strict",
+      "check_invalid_chars": true
+    },
+    {
+      "filename": "read.fq.gz",
+      "ngs_type": "ont",
+      "validation_level": "trust"
+    },
+    {
+      "directory": "illumina_reads/",
+      "ngs_type": "illumina",
+      "validation_level": "minimal"
+    },
+    {
+      "directory": "ont_reads/",
+      "ngs_type": "ont",
+      "validation_level": "trust",
+      "check_invalid_chars": true
+    }
+  ],
+  "ref_feature_filename": {
+    "filename": "feature.gff",
+    "validation_level": "strict",
+    "sort_by_position": true,
+    "check_coordinates": true
+  },
+  "mod_feature_filename": {
+    "filename": "feature.bed",
+    "validation_level": "trust"
+  },
+  "options": {
+    "threads": 4
+  }
+}

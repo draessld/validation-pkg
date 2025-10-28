@@ -1,7 +1,19 @@
+"""
+File format and compression type enumerations.
+
+Provides enums for:
+    - CodingType: Compression formats (GZIP, BZIP2, NONE)
+    - GenomeFormat: Genome file formats (FASTA, GENBANK)
+    - ReadFormat: Read file formats (FASTQ, BAM)
+    - FeatureFormat: Feature file formats (GFF, GTF, BED)
+
+Each enum supports flexible input via _missing_ methods, allowing
+extensions, filenames, and format names as input.
+"""
+
 from enum import Enum
 from pathlib import Path
 
-# ===== Enums  =====
 
 class CodingType(Enum):
     """

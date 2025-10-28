@@ -8,9 +8,11 @@ Provides structured logging with multiple outputs:
 """
 
 import sys
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from threading import Lock
 import structlog
 
 
@@ -48,6 +50,57 @@ def add_log_level_colors(_, level: str, event_dict: dict) -> dict:
     return event_dict
 
 
+def add_process_info(logger, method_name, event_dict: dict) -> dict:
+    """
+    Add process ID and thread ID to log entries.
+
+    This processor adds:
+    - process_id: The OS process ID (PID)
+    - thread_id: The thread ID within the process
+
+    These help identify which worker process generated each log message
+    in parallel processing scenarios.
+    """
+    event_dict["process_id"] = os.getpid()
+
+    # Get thread ID (native thread identifier)
+    import threading
+    event_dict["thread_id"] = threading.get_native_id()
+
+    return event_dict
+
+
+def format_process_info(logger, method_name, event_dict: dict) -> dict:
+    """
+    Format process/worker information for display in console logs.
+
+    Creates a formatted prefix like: [Worker-1 PID:12345]
+    This appears before the log message for easy identification.
+    """
+    pid = event_dict.get("process_id", os.getpid())
+    worker_id = event_dict.get("worker_id")
+    file_context = event_dict.get("file_context")
+
+    # Build the context prefix
+    context_parts = []
+
+    if worker_id:
+        context_parts.append(f"{Colors.CYAN}Worker-{worker_id}{Colors.RESET}")
+
+    context_parts.append(f"{Colors.GRAY}PID:{pid}{Colors.RESET}")
+
+    if file_context:
+        # Shorten long file paths
+        if len(file_context) > 40:
+            file_context = "..." + file_context[-37:]
+        context_parts.append(f"{Colors.MAGENTA}{file_context}{Colors.RESET}")
+
+    if context_parts:
+        event_dict["context"] = f"[{' '.join(context_parts)}]"
+
+    return event_dict
+
+
 class ValidationLogger:
     """
     Logger for validation package.
@@ -74,6 +127,9 @@ class ValidationLogger:
 
         # Storage for validation issues
         self.validation_issues = []
+
+        # Thread safety for parallel processing
+        self._issues_lock = Lock()
 
         # Will hold the structlog logger instance
         self.logger = None
@@ -124,6 +180,7 @@ class ValidationLogger:
             # Use stdlib logging with structlog
             processors = [
                 structlog.contextvars.merge_contextvars,
+                add_process_info,  # Add PID and thread ID
                 structlog.stdlib.add_log_level,
                 structlog.stdlib.add_logger_name,
                 structlog.processors.TimeStamper(fmt="iso"),
@@ -173,14 +230,16 @@ class ValidationLogger:
             # No file logging - use PrintLogger for simplicity
             processors = [
                 structlog.contextvars.merge_contextvars,
+                add_process_info,  # Add PID and thread ID
                 structlog.processors.add_log_level,
                 structlog.processors.TimeStamper(fmt="iso"),
                 structlog.processors.StackInfoRenderer(),
                 structlog.processors.format_exc_info,
             ]
 
-            # Console renderer with colors
+            # Console renderer with colors and process info
             console_processors = processors + [
+                format_process_info,  # Format worker/PID/file context
                 add_log_level_colors,
                 structlog.dev.ConsoleRenderer(colors=True)
             ]
@@ -219,23 +278,26 @@ class ValidationLogger:
         """Log warning message with optional structured context."""
         if self.logger:
             self.logger.warning(message, **kwargs)
-        self.validation_issues.append(('WARNING', message))
+        with self._issues_lock:
+            self.validation_issues.append(('WARNING', message))
 
     def error(self, message: str, **kwargs):
         """Log error message with optional structured context."""
         if self.logger:
             self.logger.error(message, **kwargs)
-        self.validation_issues.append(('ERROR', message))
+        with self._issues_lock:
+            self.validation_issues.append(('ERROR', message))
 
     def critical(self, message: str, **kwargs):
         """Log critical message with optional structured context."""
         if self.logger:
             self.logger.critical(message, **kwargs)
-        self.validation_issues.append(('CRITICAL', message))
+        with self._issues_lock:
+            self.validation_issues.append(('CRITICAL', message))
 
     def add_validation_issue(self, level: str, category: str, message: str, details: dict = None):
         """
-        Add a structured validation issue.
+        Add a structured validation issue (thread-safe).
 
         Args:
             level: ERROR, WARNING, INFO
@@ -250,7 +312,8 @@ class ValidationLogger:
             'message': message,
             'details': details or {}
         }
-        self.validation_issues.append(issue)
+        with self._issues_lock:
+            self.validation_issues.append(issue)
 
         # Also log to console (but don't add to validation_issues again!)
         log_message = f"[{category}] {message}"
@@ -271,7 +334,7 @@ class ValidationLogger:
 
     def generate_report(self):
         """
-        Generate validation report and save to file.
+        Generate validation report and save to file (thread-safe).
 
         Returns:
             str: Report content
@@ -279,10 +342,14 @@ class ValidationLogger:
         if not self.report_file:
             return None
 
+        # Copy issues list to avoid holding lock during file I/O
+        with self._issues_lock:
+            issues_copy = self.validation_issues.copy()
+
         # Count issues by level
-        errors = sum(1 for issue in self.validation_issues
+        errors = sum(1 for issue in issues_copy
                     if isinstance(issue, dict) and issue.get('level') == 'ERROR')
-        warnings = sum(1 for issue in self.validation_issues
+        warnings = sum(1 for issue in issues_copy
                       if isinstance(issue, dict) and issue.get('level') == 'WARNING')
 
         # Generate report
@@ -294,7 +361,7 @@ class ValidationLogger:
             "",
             "SUMMARY",
             "-" * 80,
-            f"Total Issues: {len(self.validation_issues)}",
+            f"Total Issues: {len(issues_copy)}",
             f"  Errors:   {errors}",
             f"  Warnings: {warnings}",
             "",
@@ -302,10 +369,10 @@ class ValidationLogger:
             "-" * 80,
         ]
 
-        if not self.validation_issues:
+        if not issues_copy:
             report_lines.append("✓ No issues found - all validations passed!")
         else:
-            for idx, issue in enumerate(self.validation_issues, 1):
+            for idx, issue in enumerate(issues_copy, 1):
                 if isinstance(issue, dict):
                     report_lines.append(f"\n{idx}. [{issue['level']}] {issue['category']}")
                     report_lines.append(f"   {issue['message']}")
@@ -329,18 +396,21 @@ class ValidationLogger:
 
     def get_summary(self) -> dict:
         """
-        Get summary of validation results.
+        Get summary of validation results (thread-safe).
 
         Returns:
             dict: Summary statistics
         """
-        errors = sum(1 for issue in self.validation_issues
+        with self._issues_lock:
+            issues_copy = self.validation_issues.copy()
+
+        errors = sum(1 for issue in issues_copy
                     if isinstance(issue, dict) and issue.get('level') == 'ERROR')
-        warnings = sum(1 for issue in self.validation_issues
+        warnings = sum(1 for issue in issues_copy
                       if isinstance(issue, dict) and issue.get('level') == 'WARNING')
 
         return {
-            'total_issues': len(self.validation_issues),
+            'total_issues': len(issues_copy),
             'errors': errors,
             'warnings': warnings,
             'passed': errors == 0
@@ -348,7 +418,7 @@ class ValidationLogger:
 
     def clear_issues(self):
         """
-        Clear all validation issues.
+        Clear all validation issues (thread-safe).
 
         This is useful for:
         - Starting a new validation run with clean state
@@ -360,7 +430,47 @@ class ValidationLogger:
             >>> logger.clear_issues()
             >>> # Now validation_issues list is empty
         """
-        self.validation_issues.clear()
+        with self._issues_lock:
+            self.validation_issues.clear()
+
+    def bind_worker_context(self, worker_id: int = None, file_context: str = None):
+        """
+        Bind worker ID and file context to logger for parallel processing.
+
+        This adds context that will appear in all subsequent log messages
+        from this worker, making it easy to identify which worker processed
+        which file.
+
+        Args:
+            worker_id: Worker number (1, 2, 3, etc.) for identification
+            file_context: Filename or description of what this worker is processing
+
+        Example:
+            >>> logger = get_logger()
+            >>> logger.bind_worker_context(worker_id=1, file_context="sample_1.fastq")
+            >>> logger.info("Starting validation")
+            # Output: [Worker-1 PID:12345 sample_1.fastq] Starting validation
+        """
+        if self.logger:
+            bind_kwargs = {}
+            if worker_id is not None:
+                bind_kwargs['worker_id'] = worker_id
+            if file_context is not None:
+                bind_kwargs['file_context'] = file_context
+
+            if bind_kwargs:
+                self.logger = self.logger.bind(**bind_kwargs)
+
+    def unbind_worker_context(self):
+        """
+        Remove worker context from logger.
+
+        This resets the logger to not include worker/file context in messages.
+        Useful when returning to the main process after parallel execution.
+        """
+        if self.logger:
+            # Unbind by re-getting the logger
+            self.logger = structlog.get_logger("bioinformatics_validator")
 
     def __enter__(self):
         """

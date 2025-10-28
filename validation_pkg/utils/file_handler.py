@@ -12,7 +12,7 @@ Provides unified utilities for:
 import gzip
 import bz2
 from pathlib import Path
-from typing import Union, TextIO
+from typing import Union, TextIO, Optional
 
 from validation_pkg.utils.formats import CodingType, GenomeFormat, ReadFormat, FeatureFormat
 from validation_pkg.exceptions import CompressionError
@@ -73,6 +73,106 @@ def get_optimal_thread_count() -> int:
         return min(cpu_count, 8)
     except:
         return 4  # Safe default
+
+
+def get_threads_for_compression(config_threads: Optional[int]) -> int:
+    """
+    Get thread count for compression, using config value or auto-detection.
+
+    This helper function centralizes the logic for determining thread count,
+    preferring user-specified values from config when available.
+
+    Args:
+        config_threads: Thread count from config.get_threads(), or None
+
+    Returns:
+        Thread count to use (always >= 1)
+
+    Example:
+        >>> # User specified 4 threads in config
+        >>> get_threads_for_compression(4)
+        4
+        >>> # No threads specified, auto-detect
+        >>> get_threads_for_compression(None)
+        8  # (or whatever get_optimal_thread_count() returns)
+    """
+    if config_threads is not None:
+        return config_threads
+    return get_optimal_thread_count()
+
+
+def calculate_thread_distribution(
+    total_threads: int,
+    num_files: int
+) -> tuple[int, int]:
+    """
+    Intelligently split threads between file parallelization and compression.
+
+    This function implements a smart strategy that adapts to the workload:
+    - Few files: Prioritize compression threads (vertical parallelism)
+    - Many files: Prioritize file workers (horizontal parallelism)
+    - Medium case: Balanced split
+
+    Args:
+        total_threads: Total number of threads/cores available
+        num_files: Number of files to process
+
+    Returns:
+        Tuple of (max_workers, compression_threads):
+            - max_workers: Number of files to process concurrently
+            - compression_threads: Threads per file for compression
+
+    Strategy:
+        - 1 file: All threads to compression (max_workers=1)
+        - 2-4 files with many threads: Balanced split
+        - Many files (>8): Prioritize file parallelization
+        - Always ensure compression_threads >= 1
+
+    Examples:
+        >>> # 1 file, 8 cores → focus on compression
+        >>> calculate_thread_distribution(8, 1)
+        (1, 8)
+
+        >>> # 4 files, 8 cores → balanced
+        >>> calculate_thread_distribution(8, 4)
+        (4, 2)
+
+        >>> # 20 files, 8 cores → focus on file parallelization
+        >>> calculate_thread_distribution(8, 20)
+        (8, 1)
+
+        >>> # 2 files, 16 cores → give each file good compression
+        >>> calculate_thread_distribution(16, 2)
+        (2, 8)
+    """
+    # Edge case: 1 file → all threads to compression
+    if num_files == 1:
+        return (1, total_threads)
+
+    # Edge case: more files than threads → 1 thread per file
+    if num_files >= total_threads:
+        return (total_threads, 1)
+
+    # Strategy: Try to balance file-level and compression-level parallelism
+    # General heuristic: sqrt(total_threads) for max_workers
+    # This gives good balance between parallelism types
+
+    import math
+
+    # For small numbers of files (2-4), use number of files as workers
+    if num_files <= 4:
+        max_workers = num_files
+        compression_threads = max(1, total_threads // num_files)
+        return (max_workers, compression_threads)
+
+    # For many files, use sqrt heuristic but cap at num_files
+    optimal_workers = min(int(math.sqrt(total_threads * num_files)), num_files)
+    max_workers = min(optimal_workers, total_threads)
+
+    # Distribute remaining threads to compression
+    compression_threads = max(1, total_threads // max_workers)
+
+    return (max_workers, compression_threads)
 
 
 def get_compression_command(coding_type: CodingType, mode: str = 'compress', threads: int = None) -> tuple:
@@ -321,7 +421,7 @@ def get_file_format(filepath: Union[str, Path]) -> str:
     return format_map.get(ext, 'unknown')
 
 
-def gz_to_bz2(gz_file: Path, bz2_file: Path):
+def gz_to_bz2(gz_file: Path, bz2_file: Path, threads: int = None):
     """
     Convert gzip compressed file to bzip2.
 
@@ -330,10 +430,11 @@ def gz_to_bz2(gz_file: Path, bz2_file: Path):
     Args:
         gz_file: Path to input .gz file
         bz2_file: Path to output .bz2 file
+        threads: Number of threads to use (None = auto-detect)
     """
     # Get best available compression commands
-    decompress_cmd, decompress_args = get_compression_command(CodingType.GZIP, 'decompress')
-    compress_cmd, compress_args = get_compression_command(CodingType.BZIP2, 'compress')
+    decompress_cmd, decompress_args = get_compression_command(CodingType.GZIP, 'decompress', threads)
+    compress_cmd, compress_args = get_compression_command(CodingType.BZIP2, 'compress', threads)
 
     # Build piped command
     cmd = f"set -o pipefail && {decompress_cmd} {' '.join(decompress_args)} {gz_file} | {compress_cmd} {' '.join(compress_args)} > {bz2_file}"
@@ -341,7 +442,7 @@ def gz_to_bz2(gz_file: Path, bz2_file: Path):
     subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
 
 
-def bz2_to_gz(bz2_file: Path, gz_file: Path):
+def bz2_to_gz(bz2_file: Path, gz_file: Path, threads: int = None):
     """
     Convert bzip2 compressed file to gzip.
 
@@ -350,17 +451,18 @@ def bz2_to_gz(bz2_file: Path, gz_file: Path):
     Args:
         bz2_file: Path to input .bz2 file
         gz_file: Path to output .gz file
+        threads: Number of threads to use (None = auto-detect)
     """
     # Get best available compression commands
-    decompress_cmd, decompress_args = get_compression_command(CodingType.BZIP2, 'decompress')
-    compress_cmd, compress_args = get_compression_command(CodingType.GZIP, 'compress')
+    decompress_cmd, decompress_args = get_compression_command(CodingType.BZIP2, 'decompress', threads)
+    compress_cmd, compress_args = get_compression_command(CodingType.GZIP, 'compress', threads)
 
     # Build piped command
     cmd = f"set -o pipefail && {decompress_cmd} {' '.join(decompress_args)} {bz2_file} | {compress_cmd} {' '.join(compress_args)} > {gz_file}"
 
     subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
 
-def none_to_gz(none_file: Path, gz_file: Path):
+def none_to_gz(none_file: Path, gz_file: Path, threads: int = None):
     """
     Compress uncompressed file to gzip.
 
@@ -369,13 +471,14 @@ def none_to_gz(none_file: Path, gz_file: Path):
     Args:
         none_file: Path to input uncompressed file
         gz_file: Path to output .gz file
+        threads: Number of threads to use (None = auto-detect)
     """
-    compress_cmd, compress_args = get_compression_command(CodingType.GZIP, 'compress')
+    compress_cmd, compress_args = get_compression_command(CodingType.GZIP, 'compress', threads)
 
     cmd = f"{compress_cmd} {' '.join(compress_args)} {none_file} > {gz_file}"
     subprocess.run(cmd, shell=True, check=True)
 
-def gz_to_none(gz_file: Path, none_file: Path):
+def gz_to_none(gz_file: Path, none_file: Path, threads: int = None):
     """
     Decompress gzip file to uncompressed file.
 
@@ -384,13 +487,14 @@ def gz_to_none(gz_file: Path, none_file: Path):
     Args:
         gz_file: Path to input .gz file
         none_file: Path to output uncompressed file
+        threads: Number of threads to use (None = auto-detect)
     """
-    decompress_cmd, decompress_args = get_compression_command(CodingType.GZIP, 'decompress')
+    decompress_cmd, decompress_args = get_compression_command(CodingType.GZIP, 'decompress', threads)
 
     cmd = f"{decompress_cmd} {' '.join(decompress_args)} {gz_file} > {none_file}"
     subprocess.run(cmd, shell=True, check=True)
 
-def bz2_to_none(bz2_file: Path, none_file: Path):
+def bz2_to_none(bz2_file: Path, none_file: Path, threads: int = None):
     """
     Decompress bzip2 file to uncompressed file.
 
@@ -399,13 +503,14 @@ def bz2_to_none(bz2_file: Path, none_file: Path):
     Args:
         bz2_file: Path to input .bz2 file
         none_file: Path to output uncompressed file
+        threads: Number of threads to use (None = auto-detect)
     """
-    decompress_cmd, decompress_args = get_compression_command(CodingType.BZIP2, 'decompress')
+    decompress_cmd, decompress_args = get_compression_command(CodingType.BZIP2, 'decompress', threads)
 
     cmd = f"{decompress_cmd} {' '.join(decompress_args)} {bz2_file} > {none_file}"
     subprocess.run(cmd, shell=True, check=True)
 
-def none_to_bz2(none_file: Path, bz2_file: Path):
+def none_to_bz2(none_file: Path, bz2_file: Path, threads: int = None):
     """
     Compress uncompressed file to bzip2.
 
@@ -414,14 +519,15 @@ def none_to_bz2(none_file: Path, bz2_file: Path):
     Args:
         none_file: Path to input uncompressed file
         bz2_file: Path to output .bz2 file
+        threads: Number of threads to use (None = auto-detect)
     """
-    compress_cmd, compress_args = get_compression_command(CodingType.BZIP2, 'compress')
+    compress_cmd, compress_args = get_compression_command(CodingType.BZIP2, 'compress', threads)
 
     cmd = f"{compress_cmd} {' '.join(compress_args)} {none_file} > {bz2_file}"
     subprocess.run(cmd, shell=True, check=True)
 
 
-def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, use_parallel: bool = True):
+def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, use_parallel: bool = True, threads: int = None):
     """
     Open a file handle for writing compressed data efficiently.
 
@@ -434,6 +540,7 @@ def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, 
         filepath: Path to output file
         coding_type: CodingType enum (GZIP, BZIP2, or NONE)
         use_parallel: If True, use parallel tools (pigz/pbzip2) when available
+        threads: Number of threads to use (None = auto-detect)
 
     Returns:
         File handle for writing (text mode)
@@ -441,7 +548,7 @@ def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, 
     Example:
         >>> from validation_pkg.utils.formats import CodingType
         >>> from pathlib import Path
-        >>> with open_compressed_writer('output.gz', CodingType.GZIP) as f:
+        >>> with open_compressed_writer('output.gz', CodingType.GZIP, threads=4) as f:
         ...     f.write("Hello, world!\\n")
 
     Note:
@@ -462,7 +569,7 @@ def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, 
 
         if use_subprocess:
             # Use subprocess pipe for parallel compression
-            compress_cmd, compress_args = get_compression_command(coding_type, 'compress')
+            compress_cmd, compress_args = get_compression_command(coding_type, 'compress', threads)
 
             # Create subprocess with pipe to stdin
             process = subprocess.Popen(

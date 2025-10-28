@@ -1,9 +1,15 @@
 """
-Global settings and configuration for validators.
+Base settings infrastructure for validators.
 
-This file contains:
-- Global constants (output directory names, etc.)
-- BaseSettings class with common functionality for all validator settings
+Provides BaseSettings abstract base class with immutable update pattern,
+deep copy support, and dictionary serialization for all validator Settings classes.
+
+Features:
+    - Immutable update pattern (prevents shared mutable state bugs)
+    - Deep copy support
+    - Dictionary serialization (to_dict/from_dict)
+    - Field name validation (prevents typos)
+    - Pretty printing for inspection
 """
 
 from dataclasses import asdict, fields

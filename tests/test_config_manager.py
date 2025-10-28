@@ -756,6 +756,385 @@ class TestConfigManagerOutputDirectory:
         assert all(read.output_dir == expected_output_dir for read in loaded_config.reads)
 
 
+class TestConfigOptionsThreads:
+    """Test suite for options.threads configuration parsing and validation."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    def create_config_with_threads(self, temp_dir, threads_value):
+        """Helper to create config with threads option."""
+        # Create dummy files
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}],
+            "options": {"threads": threads_value}
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+        return config_file
+
+    def test_threads_valid_integer(self, temp_dir):
+        """Test parsing valid thread count."""
+        config_file = self.create_config_with_threads(temp_dir, 4)
+        config = ConfigManager.load(str(config_file))
+
+        assert config.options['threads'] == 4
+        assert config.get_threads() == 4
+
+    def test_threads_single_thread(self, temp_dir):
+        """Test single thread configuration."""
+        config_file = self.create_config_with_threads(temp_dir, 1)
+        config = ConfigManager.load(str(config_file))
+
+        assert config.get_threads() == 1
+
+    def test_threads_many_threads(self, temp_dir):
+        """Test high thread count (should warn but allow)."""
+        config_file = self.create_config_with_threads(temp_dir, 20)
+        config = ConfigManager.load(str(config_file))
+
+        # Should succeed but log warning
+        assert config.get_threads() == 20
+
+    def test_threads_null_means_autodetect(self, temp_dir):
+        """Test that null threads value means auto-detect."""
+        config_file = self.create_config_with_threads(temp_dir, None)
+        config = ConfigManager.load(str(config_file))
+
+        assert config.get_threads() is None
+
+    def test_threads_omitted_means_autodetect(self, temp_dir):
+        """Test that omitting threads means auto-detect."""
+        # Create config without threads option
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        assert loaded_config.get_threads() is None
+
+    def test_threads_zero_raises_error(self, temp_dir):
+        """Test that threads=0 raises ValueError."""
+        config_file = self.create_config_with_threads(temp_dir, 0)
+
+        with pytest.raises(ConfigurationError, match="threads.*positive integer"):
+            ConfigManager.load(str(config_file))
+
+    def test_threads_negative_raises_error(self, temp_dir):
+        """Test that negative threads raises ValueError."""
+        config_file = self.create_config_with_threads(temp_dir, -1)
+
+        with pytest.raises(ConfigurationError, match="threads.*positive integer"):
+            ConfigManager.load(str(config_file))
+
+    def test_threads_wrong_type_string_raises_error(self, temp_dir):
+        """Test that string threads value raises error."""
+        # Create config with string threads
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}],
+            "options": {"threads": "4"}  # String instead of int
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        with pytest.raises(ConfigurationError, match="threads.*must be an integer"):
+            ConfigManager.load(str(config_file))
+
+    def test_threads_wrong_type_float_raises_error(self, temp_dir):
+        """Test that float threads value raises error."""
+        config_file = self.create_config_with_threads(temp_dir, 4.5)
+
+        with pytest.raises(ConfigurationError, match="threads.*must be an integer"):
+            ConfigManager.load(str(config_file))
+
+    def test_options_not_dict_raises_error(self, temp_dir):
+        """Test that non-dict options raises error."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}],
+            "options": "invalid"  # Should be dict
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        with pytest.raises(ConfigurationError, match="options.*must be a dictionary"):
+            ConfigManager.load(str(config_file))
+
+    def test_config_get_threads_method(self):
+        """Test Config.get_threads() method."""
+        config = Config()
+
+        # No threads specified
+        assert config.get_threads() is None
+
+        # Threads specified
+        config.options['threads'] = 4
+        assert config.get_threads() == 4
+
+        # Threads explicitly null
+        config.options['threads'] = None
+        assert config.get_threads() is None
+
+
+class TestConfigValidatorSettings:
+    """Test suite for validator settings extraction from config.json."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    def test_genome_config_extracts_validation_level(self, temp_dir):
+        """Test that validation_level is extracted from genome config."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {
+                "filename": "ref.fasta",
+                "validation_level": "trust"
+            },
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        assert loaded_config.ref_genome.settings_dict == {"validation_level": "trust"}
+        assert loaded_config.mod_genome.settings_dict == {}
+
+    def test_read_config_extracts_validation_level(self, temp_dir):
+        """Test that validation_level is extracted from read config."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [
+                {
+                    "filename": "reads.fastq",
+                    "ngs_type": "illumina",
+                    "validation_level": "trust"
+                }
+            ]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        assert loaded_config.reads[0].settings_dict == {"validation_level": "trust"}
+        assert loaded_config.reads[0].ngs_type == "illumina"
+
+    def test_feature_config_extracts_validation_level(self, temp_dir):
+        """Test that validation_level is extracted from feature config."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+        (temp_dir / "features.gff").write_text("##gff-version 3\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}],
+            "ref_feature_filename": {
+                "filename": "features.gff",
+                "validation_level": "minimal"
+            }
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        assert loaded_config.ref_feature.settings_dict == {"validation_level": "minimal"}
+
+    def test_multiple_settings_extracted(self, temp_dir):
+        """Test that multiple validator settings are extracted correctly."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {
+                "filename": "ref.fasta",
+                "validation_level": "trust",
+                "plasmid_split": True,
+                "min_sequence_length": 500
+            },
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        expected_settings = {
+            "validation_level": "trust",
+            "plasmid_split": True,
+            "min_sequence_length": 500
+        }
+        assert loaded_config.ref_genome.settings_dict == expected_settings
+
+    def test_read_settings_extracted_with_check_invalid_chars(self, temp_dir):
+        """Test extraction of check_invalid_chars for reads."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [
+                {
+                    "filename": "reads.fastq",
+                    "ngs_type": "ont",
+                    "validation_level": "strict",
+                    "check_invalid_chars": True
+                }
+            ]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        expected_settings = {
+            "validation_level": "strict",
+            "check_invalid_chars": True
+        }
+        assert loaded_config.reads[0].settings_dict == expected_settings
+
+    def test_directory_reads_inherit_settings(self, temp_dir):
+        """Test that files from directory inherit validator settings."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+
+        # Create read directory with files
+        reads_dir = temp_dir / "ont_reads"
+        reads_dir.mkdir()
+        (reads_dir / "read1.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+        (reads_dir / "read2.fastq").write_text("@read2\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [
+                {
+                    "directory": "ont_reads/",
+                    "ngs_type": "ont",
+                    "validation_level": "trust"
+                }
+            ]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        # Both files from directory should have validation_level setting
+        assert len(loaded_config.reads) == 2
+        for read_config in loaded_config.reads:
+            assert read_config.settings_dict == {"validation_level": "trust"}
+
+    def test_non_validator_fields_not_extracted(self, temp_dir):
+        """Test that non-validator fields are not included in settings_dict."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {
+                "filename": "ref.fasta",
+                "validation_level": "trust",
+                "custom_field": "value",  # Not a validator setting
+                "another_extra": 123
+            },
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        # Only validation_level should be in settings_dict
+        assert loaded_config.ref_genome.settings_dict == {"validation_level": "trust"}
+        # Other fields should be in extra
+        assert loaded_config.ref_genome.extra == {
+            "custom_field": "value",
+            "another_extra": 123
+        }
+
+    def test_empty_settings_dict_when_no_settings(self, temp_dir):
+        """Test that settings_dict is empty when no validator settings provided."""
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        loaded_config = ConfigManager.load(str(config_file))
+
+        assert loaded_config.ref_genome.settings_dict == {}
+        assert loaded_config.mod_genome.settings_dict == {}
+        assert loaded_config.reads[0].settings_dict == {}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

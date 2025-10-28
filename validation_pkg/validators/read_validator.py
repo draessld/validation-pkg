@@ -1,17 +1,30 @@
 """
 Read file validator and processor.
 
-Handles FASTQ and BAM formats with compression support.
+This module provides comprehensive validation and processing for sequencing read files in FASTQ
+and BAM formats. It handles decompression, parsing, validation, and various quality control
+operations for next-generation sequencing data.
+
+Key Features:
+    - Multi-format support: FASTQ and BAM (with optional conversion)
+    - Compression handling: gzip, bzip2, and uncompressed files
+    - Three validation levels: strict (full validation), trust (fast validation), minimal (copy only)
+    - BAM to FASTQ conversion using pysam or samtools
+    - Fast line counting for trust mode validation
+    - NGS type-based output directory organization
+    - Parallel compression support: automatic detection of pigz/pbzip2
+
+Classes:
+    ReadValidator: Main validator class for sequencing read files
+    ReadValidator.Settings: Configuration dataclass for validation behavior
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, IO
+from typing import Optional, List, IO
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-import gzip
-import bz2
 import shutil
 
 from validation_pkg.logger import get_logger
@@ -37,16 +50,37 @@ from validation_pkg.utils.file_handler import (
 
 class ReadValidator:
     """
-    Validates and processes read files (FASTQ and BAM formats).
+    Validates and processes sequencing read files in FASTQ and BAM formats.
 
-    Workflow:
-    1. Detect and handle compression
-    2. Detect file format
-    3. Parse and validate using BioPython
-    4. Apply editing specifications
-    5. Convert to FASTQ format
-    6. Compress if requested
-    7. Save to output directory
+    This validator provides three validation levels:
+        - 'strict': Full parsing and validation of all reads (slowest, most thorough)
+        - 'trust': Fast validation - check line count (FASTQ) or header (BAM) and first records (~10-15x faster)
+        - 'minimal': Only verify file format and copy as-is (fastest, FASTQ only)
+
+    Processing Workflow:
+        FASTQ: Parse → Validate → Apply edits → Save with optional compression
+        BAM: Optionally copy original → Convert to FASTQ → Parse → Validate → Save
+
+    Key Features:
+        - FASTQ line count validation (must be divisible by 4)
+        - Invalid character detection (non-ATCGN nucleotides)
+        - Duplicate ID detection
+        - BAM to FASTQ conversion (requires pysam or samtools)
+        - NGS type-based output directory organization
+        - Efficient compression conversion without full decompression
+
+    Attributes:
+        read_config: ReadConfig object with file path, format, and NGS type
+        output_dir: Directory for output files
+        settings: Settings object controlling validation and processing behavior
+        sequences: List of parsed SeqRecord objects (populated during validation)
+
+    Example:
+        >>> from validation_pkg import ConfigManager, ReadValidator
+        >>> config = ConfigManager.load("config.json")
+        >>> settings = ReadValidator.Settings(validation_level='trust', outdir_by_ngs_type=True)
+        >>> validator = ReadValidator(config.reads[0], config.output_dir, settings)
+        >>> validator.validate()
     """
 
     @dataclass
@@ -101,6 +135,18 @@ class ReadValidator:
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
         outdir_by_ngs_type: bool = False
+
+        # Unified threads parameter (None = auto-detect)
+        # If specified, automatically splits between max_workers and compression_threads
+        threads: Optional[int] = None
+
+        # Compression threads (None = auto-detect)
+        # Explicit setting overrides thread splitting from 'threads'
+        compression_threads: Optional[int] = None
+
+        # Parallel processing (None = no parallelization, int = max workers)
+        # Explicit setting overrides thread splitting from 'threads'
+        max_workers: Optional[int] = None
 
     def __init__(self, read_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
         """
@@ -331,11 +377,14 @@ class ReadValidator:
         """
         Validate only the first FASTQ record for format correctness.
 
-        Checks:
-        1. Line 1 starts with '@' (sequence ID)
-        2. Line 2 contains sequence
-        3. Line 3 starts with '+' (separator)
-        4. Line 4 contains quality scores
+        This method performs fast validation by checking only the first record
+        without parsing the entire file. Used in trust mode for performance.
+
+        Validation Checks:
+            1. Line 1 starts with '@' (sequence ID)
+            2. Line 2 contains sequence
+            3. Line 3 starts with '+' (separator)
+            4. Line 4 contains quality scores (same length as sequence)
 
         Returns:
             First SeqRecord if valid, None if validation fails
@@ -601,16 +650,21 @@ class ReadValidator:
         """
         Convert BAM file to FASTQ format using pysam or samtools.
 
-        Behavior depends on validation_level:
-        - 'strict': Full conversion of all reads
-        - 'trust': Only validate BAM header and first few reads
-        - 'minimal': Skip conversion entirely
+        This method attempts to use pysam (Python library) first for better
+        performance and control. If pysam is not available, it falls back to
+        the samtools command-line tool.
 
-        This method tries to use pysam first, and falls back to samtools
-        command-line tool if pysam is not available.
+        Behavior by validation level:
+            - 'strict': Full conversion of all reads (skips unmapped/secondary/supplementary)
+            - 'trust': Only validate BAM header and first 10 reads for format correctness
+            - 'minimal': Skip conversion entirely
+
+        Progress Reporting:
+            Reports progress every 5% or 100k reads (whichever is appropriate)
 
         Raises:
-            ReadValidationError: If conversion fails or neither tool is available
+            ReadValidationError: If conversion fails or neither pysam nor samtools is available
+            BamFormatError: If BAM file is malformed or missing header
         """
         import subprocess
 
@@ -978,7 +1032,7 @@ class ReadValidator:
 
                 conversion_func = conversion_map.get((input_coding, output_coding))
                 if conversion_func:
-                    conversion_func(self.input_path, output_path)
+                    conversion_func(self.input_path, output_path, threads=self.settings.compression_threads)
                 else:
                     error_msg = f"Unsupported coding conversion: {input_coding} -> {output_coding}"
                     raise ReadValidationError(error_msg)
@@ -991,7 +1045,7 @@ class ReadValidator:
         self.logger.debug(f"Writing output to: {output_path}")
 
         # Use optimized compression writer
-        with open_compressed_writer(output_path, coding) as handle:
+        with open_compressed_writer(output_path, coding, threads=self.settings.compression_threads) as handle:
             SeqIO.write(self.sequences, handle, 'fastq')
 
         self.logger.info(f"Output saved: {output_path}")

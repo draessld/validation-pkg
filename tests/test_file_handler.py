@@ -30,6 +30,7 @@ from validation_pkg.utils.file_handler import (
     none_to_bz2,
     check_compression_tool_available,
     get_optimal_thread_count,
+    get_threads_for_compression,
     get_compression_command,
     open_compressed_writer,
 )
@@ -659,5 +660,71 @@ class TestOpenCompressedWriter:
         # File should be fully written and closed
         assert output_file.exists()
         # Should be able to read immediately
+        with gzip.open(output_file, 'rt') as f:
+            assert f.read() == sample_content
+
+
+class TestThreadsConfiguration:
+    """Tests for thread configuration functionality."""
+
+    def test_get_threads_for_compression_with_config_value(self):
+        """Test get_threads_for_compression with user-specified value."""
+        result = get_threads_for_compression(4)
+        assert result == 4
+
+    def test_get_threads_for_compression_with_none(self):
+        """Test get_threads_for_compression with None (auto-detect)."""
+        result = get_threads_for_compression(None)
+        assert isinstance(result, int)
+        assert 1 <= result <= 8
+
+    def test_get_threads_for_compression_with_one(self):
+        """Test get_threads_for_compression with single thread."""
+        result = get_threads_for_compression(1)
+        assert result == 1
+
+    def test_get_threads_for_compression_with_many(self):
+        """Test get_threads_for_compression with many threads."""
+        result = get_threads_for_compression(16)
+        assert result == 16
+
+    def test_get_compression_command_with_custom_threads(self):
+        """Test get_compression_command respects custom thread count."""
+        cmd, args = get_compression_command(CodingType.GZIP, 'compress', threads=2)
+
+        assert cmd in ('pigz', 'gzip')
+        if cmd == 'pigz':
+            # pigz should include thread argument
+            assert '2' in args or '-p' in args
+
+    def test_compression_conversion_with_threads(self, temp_dir, sample_content):
+        """Test compression conversion functions accept threads parameter."""
+        plain_file = temp_dir / "test.txt"
+        gz_file = temp_dir / "test.txt.gz"
+        bz2_file = temp_dir / "test.txt.bz2"
+
+        plain_file.write_text(sample_content)
+
+        # Test none_to_gz with threads
+        none_to_gz(plain_file, gz_file, threads=2)
+        assert gz_file.exists()
+        with gzip.open(gz_file, 'rt') as f:
+            assert f.read() == sample_content
+
+        # Test gz_to_bz2 with threads
+        gz_to_bz2(gz_file, bz2_file, threads=2)
+        assert bz2_file.exists()
+        with bz2.open(bz2_file, 'rt') as f:
+            assert f.read() == sample_content
+
+    def test_open_compressed_writer_with_threads(self, temp_dir, sample_content):
+        """Test open_compressed_writer with custom threads."""
+        output_file = temp_dir / "output.txt.gz"
+
+        with open_compressed_writer(output_file, CodingType.GZIP, threads=2) as f:
+            f.write(sample_content)
+
+        # Verify file was written correctly
+        assert output_file.exists()
         with gzip.open(output_file, 'rt') as f:
             assert f.read() == sample_content
