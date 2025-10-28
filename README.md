@@ -6,6 +6,7 @@ A comprehensive validation package for genomic data files used in bioinformatics
 
 ## Table of Contents
 
+- [Documentation](#documentation)
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Validation Levels](#validation-levels)
@@ -18,6 +19,26 @@ A comprehensive validation package for genomic data files used in bioinformatics
 - [Tips and Best Practices](#tips-and-best-practices)
 - [Requirements](#requirements)
 - [Version Information](#version-information)
+
+---
+
+## Documentation
+
+### Getting Started
+- **[Quick Start](#quick-start)** - Get up and running in 5 minutes
+- **[examples/README.md](examples/README.md)** - 13 runnable examples with explanations
+- **[examples/QUICK_REFERENCE.md](examples/QUICK_REFERENCE.md)** - Syntax cheat sheet
+
+### Core Documentation
+- **[docs/CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md)** - Configuration file reference and examples
+- **[docs/LOGGING_GUIDE.md](docs/LOGGING_GUIDE.md)** - Logging system and debugging
+- **[docs/VALIDATOR_DESIGN.md](docs/VALIDATOR_DESIGN.md)** - Validator architecture and design patterns
+- **[docs/PERFORMANCE_GUIDE.md](docs/PERFORMANCE_GUIDE.md)** - Performance optimization techniques
+
+### For Developers
+- **[CLAUDE.md](CLAUDE.md)** - AI assistant guidance and architectural decisions
+- **[tests/README.md](tests/README.md)** - Testing guide, fixtures, and debugging
+- **[examples/INDEX.md](examples/INDEX.md)** - Examples navigation guide
 
 ---
 

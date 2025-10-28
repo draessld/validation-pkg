@@ -23,9 +23,9 @@ tmp
 logs
 **/output/**
 **/valid/**
+docs/archive/
 
 #   Claude AI
 .mcp.json
 .claude/
-CLAUDE*.md
-.claudeignore
+CLAUDE.md
