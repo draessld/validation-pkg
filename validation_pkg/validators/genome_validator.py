@@ -24,6 +24,7 @@ from validation_pkg.exceptions import (
     GenBankFormatError,
     CompressionError
 )
+from validation_pkg.utils.file_handler import open_compressed_writer
 
 
 class GenomeValidator:
@@ -523,15 +524,16 @@ class GenomeValidator:
         # Write plasmid sequences with appropriate compression
         self.logger.debug(f"Writing plasmid sequences to: {plasmid_path}")
 
+        # Normalize coding type to CodingType enum
+        coding_enum = CT.NONE
         if coding in ('gz', 'gzip', CT.GZIP):
-            with gzip.open(plasmid_path, 'wt') as handle:
-                SeqIO.write(plasmid_sequences, handle, 'fasta')
+            coding_enum = CT.GZIP
         elif coding in ('bz2', 'bzip2', CT.BZIP2):
-            with bz2.open(plasmid_path, 'wt') as handle:
-                SeqIO.write(plasmid_sequences, handle, 'fasta')
-        else:
-            with open(plasmid_path, 'w') as handle:
-                SeqIO.write(plasmid_sequences, handle, 'fasta')
+            coding_enum = CT.BZIP2
+
+        # Use optimized compression writer
+        with open_compressed_writer(plasmid_path, coding_enum) as handle:
+            SeqIO.write(plasmid_sequences, handle, 'fasta')
 
         self.logger.info(f"Plasmid sequences saved: {plasmid_path}")
 
@@ -666,15 +668,16 @@ class GenomeValidator:
         # Write output with appropriate compression
         self.logger.debug(f"Writing output to: {output_path}")
 
+        # Normalize coding type to CodingType enum
+        coding_enum = CT.NONE
         if coding in ('gz', 'gzip', CT.GZIP):
-            with gzip.open(output_path, 'wt') as handle:
-                SeqIO.write(self.sequences, handle, 'fasta')
+            coding_enum = CT.GZIP
         elif coding in ('bz2', 'bzip2', CT.BZIP2):
-            with bz2.open(output_path, 'wt') as handle:
-                SeqIO.write(self.sequences, handle, 'fasta')
-        else:
-            with open(output_path, 'w') as handle:
-                SeqIO.write(self.sequences, handle, 'fasta')
+            coding_enum = CT.BZIP2
+
+        # Use optimized compression writer
+        with open_compressed_writer(output_path, coding_enum) as handle:
+            SeqIO.write(self.sequences, handle, 'fasta')
 
         self.logger.info(f"Output saved: {output_path}")
 

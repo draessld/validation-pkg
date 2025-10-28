@@ -27,5 +27,5 @@ logs
 #   Claude AI
 .mcp.json
 .claude/
-CLAUDE_*.md
+CLAUDE*.md
 .claudeignore

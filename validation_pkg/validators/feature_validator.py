@@ -22,6 +22,7 @@ from validation_pkg.exceptions import (
 )
 from validation_pkg.utils.formats import CodingType as CT
 from validation_pkg.utils.formats import FeatureFormat
+from validation_pkg.utils.file_handler import open_compressed_writer
 
 @dataclass
 class Feature:
@@ -689,13 +690,15 @@ class FeatureValidator:
         output_path = output_dir / output_filename
         self.logger.debug(f"Writing output to: {output_path}")
 
-        open_func = {
-            'gz': lambda p: gzip.open(p, 'wt'),
-            'bz2': lambda p: bz2.open(p, 'wt'),
-            None: lambda p: open(p, 'w')
-        }.get(self.settings.coding_type, lambda p: open(p, 'w'))
+        # Normalize coding type to CodingType enum
+        coding_enum = CT.NONE
+        if self.settings.coding_type in ('gz', 'gzip'):
+            coding_enum = CT.GZIP
+        elif self.settings.coding_type in ('bz2', 'bzip2'):
+            coding_enum = CT.BZIP2
 
-        with open_func(output_path) as handle:
+        # Use optimized compression writer
+        with open_compressed_writer(output_path, coding_enum) as handle:
             # Write GFF header
             handle.write("##gff-version 3\n")
 

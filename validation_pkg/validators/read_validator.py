@@ -31,7 +31,8 @@ from validation_pkg.utils.file_handler import (
     gz_to_bz2,
     gz_to_none,
     bz2_to_none,
-    none_to_bz2
+    none_to_bz2,
+    open_compressed_writer
 )
 
 class ReadValidator:
@@ -989,15 +990,9 @@ class ReadValidator:
         # Write output with appropriate compression
         self.logger.debug(f"Writing output to: {output_path}")
 
-        if coding == CT.GZIP:
-            with gzip.open(output_path, 'wt') as handle:
-                SeqIO.write(self.sequences, handle, 'fastq')
-        elif coding == CT.BZIP2:
-            with bz2.open(output_path, 'wt') as handle:
-                SeqIO.write(self.sequences, handle, 'fastq')
-        else:
-            with open(output_path, 'w') as handle:
-                SeqIO.write(self.sequences, handle, 'fastq')
+        # Use optimized compression writer
+        with open_compressed_writer(output_path, coding) as handle:
+            SeqIO.write(self.sequences, handle, 'fastq')
 
         self.logger.info(f"Output saved: {output_path}")
 
