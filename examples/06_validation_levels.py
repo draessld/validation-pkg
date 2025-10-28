@@ -136,6 +136,26 @@ def main():
     print("  - Use TRUST for production with previously validated data")
     print("  - Use MINIMAL only for archiving when validation is not needed")
     print("=" * 70)
+    print()
+
+    # Tip about config-level settings
+    print("💡 TIP: You can also specify validation_level in config.json!")
+    print("Example config.json:")
+    print('{')
+    print('  "ref_genome_filename": {')
+    print('    "filename": "genome.fasta",')
+    print('    "validation_level": "trust"')
+    print('  },')
+    print('  "reads": [')
+    print('    {')
+    print('      "filename": "reads.fastq.gz",')
+    print('      "ngs_type": "illumina",')
+    print('      "validation_level": "minimal"')
+    print('    }')
+    print('  ]')
+    print('}')
+    print()
+    print("See example 12_config_validation_levels.py for config-based approach.")
 
 if __name__ == "__main__":
     main()

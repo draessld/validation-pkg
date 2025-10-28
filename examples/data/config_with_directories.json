@@ -17,5 +17,8 @@
   ],
   "ref_feature_filename": {
     "filename": "feature.gff"
+  },
+  "options": {
+    "threads": 8
   }
 }

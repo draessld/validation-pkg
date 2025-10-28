@@ -31,7 +31,9 @@ examples/
 ├── 08_error_handling.py          # Exception handling patterns
 ├── 09_settings_patterns.py       # Working with immutable settings
 ├── 10_complete_pipeline.py       # Production-ready pipeline example
-└── 11_directory_based_reads.py   # Directory-based read validation
+├── 11_directory_based_reads.py   # Directory-based read validation
+├── 12_config_validation_levels.py # Config-level validation settings
+└── 13_parallel_processing.py     # Parallel file processing
 ```
 
 ## Test Data Files
@@ -327,6 +329,81 @@ This is ideal when you have many read files from the same sequencing run.
 }
 ```
 
+### 12. Config-Level Validation Settings (`12_config_validation_levels.py`)
+**Best for**: Production pipelines, reducing code changes, centralizing configuration
+
+Demonstrates how to specify validator settings directly in config.json:
+- Setting validation_level in configuration files
+- Per-file custom settings (min_sequence_length, check_invalid_chars, etc.)
+- Settings precedence (code overrides config)
+- Directory reads inheriting settings
+- Mixing config-level and code-level settings
+
+Benefits of config-level settings:
+- Change validation behavior without code changes
+- Centralize all configuration in one place
+- Different settings per file
+- Easier to manage production deployments
+
+```python
+# Config with validator settings
+{
+  "ref_genome_filename": {
+    "filename": "genome.fasta",
+    "validation_level": "trust",
+    "min_sequence_length": 500,
+    "replace_id_with": "chr"
+  },
+  "reads": [
+    {
+      "filename": "reads.fastq.gz",
+      "ngs_type": "illumina",
+      "validation_level": "minimal",
+      "check_invalid_chars": false
+    }
+  ]
+}
+
+# Automatically applied by functional API
+config = ConfigManager.load("config.json")
+validate_genome(config.ref_genome, output_dir)  # Uses config settings
+```
+
+### 13. Parallel Processing (`13_parallel_processing.py`)
+**Best for**: Multiple files, large datasets, maximum performance
+
+Demonstrates how to process multiple files concurrently:
+- **Unified threads parameter** (RECOMMENDED): Automatic splitting between file and compression parallelization
+- Manual control with max_workers and compression_threads (power users)
+- File-level parallelization for multiple genomes/reads/features
+- Combining with trust mode for maximum speed
+- Error handling in parallel mode
+- Performance optimization strategies
+
+Performance comparison for 8 large FASTQ files:
+- Sequential (strict): ~240 seconds
+- Sequential (trust): ~25 seconds (10x faster)
+- Parallel 4 workers (trust): ~7 seconds (35x faster)
+- With unified threads=8: Automatic optimization
+
+```python
+# Simple approach: unified threads parameter
+settings = ReadValidator.Settings()
+settings = settings.update(
+    threads=8,  # Automatically splits based on file count
+    validation_level='trust'
+)
+validate_reads(config.reads, output_dir, settings)
+
+# Power users: manual control
+settings = ReadValidator.Settings()
+settings = settings.update(
+    max_workers=4,  # Process 4 files concurrently
+    compression_threads=2,  # Each uses 2 threads for compression
+    validation_level='trust'
+)
+```
+
 ## Quick Start Guide
 
 ### 1. Install the package
@@ -442,6 +519,9 @@ settings = GenomeValidator.Settings().update(
   "ref_feature_filename": {
     "filename": "annotations.gff.gz",
     "sort_by_position": true
+  },
+  "options": {
+    "threads": 8
   }
 }
 ```
@@ -475,17 +555,29 @@ Do you trust the data source?
    - 10-15x faster than STRICT
    - Still validates first record/sequence
 
-2. **Enable `outdir_by_ngs_type`** for reads
+2. **Use parallel processing for multiple files** (NEW)
+   - Set `threads=8` for automatic optimization
+   - Or manually set `max_workers=4` for 4 concurrent files
+   - Combine with trust mode for maximum speed (35-40x faster)
+   - See example 13 for details
+
+3. **Enable `outdir_by_ngs_type`** for reads
    - Automatically organizes by sequencing platform
    - Easier downstream processing
 
-3. **Use compression** (coding_type='gz')
+4. **Use compression** (coding_type='gz')
    - Saves disk space
    - Standard in bioinformatics pipelines
+   - pigz/pbzip2 auto-detected for 3-4x compression speedup
 
-4. **Batch process similar files** together
+5. **Batch process similar files** together
    - Reuse settings objects
    - Process by file type
+
+6. **Use config-level settings** for production
+   - Centralize configuration in config.json
+   - Change behavior without code changes
+   - See example 12 for details
 
 ## Troubleshooting
 

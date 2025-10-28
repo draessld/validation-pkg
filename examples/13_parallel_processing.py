@@ -1,19 +1,22 @@
 """
-Example 12: Parallel Processing for Multiple Files
+Example 13: Parallel Processing for Multiple Files
 ===================================================
 
 Demonstrates how to use file-level parallelization to process multiple
 files concurrently, significantly reducing processing time.
 
 This example shows:
-1. Basic parallel processing with validate_reads()
-2. Using validate_genomes() for multiple genome files
-3. Error handling in parallel mode
-4. Combining parallelization with other optimizations
+1. Unified threads parameter (RECOMMENDED) - automatic thread splitting
+2. Basic parallel processing with validate_reads()
+3. Using validate_genomes() for multiple genome files
+4. Manual control with max_workers and compression_threads (power users)
+5. Error handling in parallel mode
+6. Combining parallelization with other optimizations
 
 Performance comparison:
 - Sequential: 8 files @ 30s each = 240 seconds
 - Parallel (4 workers): 8 files = ~65 seconds (3.7x speedup)
+- With unified threads=8: Automatically optimizes based on file count
 """
 
 from validation_pkg import (
@@ -27,26 +30,83 @@ from validation_pkg import (
     setup_logging
 )
 
-def example_1_basic_parallel_reads():
+def example_1_unified_threads_parameter():
     """
-    Example 1: Basic parallel processing of read files.
+    Example 1: Using the unified threads parameter (RECOMMENDED).
 
-    Process multiple FASTQ files concurrently using max_workers.
+    The threads parameter automatically splits between:
+    - File-level parallelization (max_workers)
+    - Compression-level parallelization (compression_threads)
+
+    This is the simplest and recommended approach for most users.
     """
     print("=" * 80)
-    print("Example 1: Basic Parallel Read Processing")
+    print("Example 1: Unified Threads Parameter (RECOMMENDED)")
     print("=" * 80)
 
     # Load configuration
     config = ConfigManager.load("test_configs/parallel_reads.json")
 
-    # Configure parallel processing
+    # Simple: Just set threads, automatic splitting
     settings = ReadValidator.Settings()
     settings = settings.update(
-        max_workers=4,  # Use 4 parallel workers
+        threads=8,  # Automatically splits between file and compression parallelization
         validation_level='trust',  # Fast validation
         coding_type='gz'  # Compress output
     )
+
+    print("\nUsing threads=8:")
+    print("  - Automatically splits between file and compression parallelization")
+    print("  - Smart strategy based on number of files")
+    print("  - For 4 files: 4 workers × 2 compression threads each")
+    print("  - For 1 file: 1 worker × 8 compression threads")
+    print("  - For 8+ files: 8 workers × 1 compression thread each")
+
+    # Process all read files
+    results = validate_reads(config.reads, config.output_dir, settings)
+
+    # Check results
+    print("\nResults:")
+    successes = [r for r in results if r['success']]
+    failures = [r for r in results if not r['success']]
+
+    print(f"✓ Successful: {len(successes)}/{len(results)} files")
+    for result in successes:
+        print(f"  - {result['filename']}")
+
+    if failures:
+        print(f"✗ Failed: {len(failures)} files")
+        for result in failures:
+            print(f"  - {result['filename']}: {result['error']}")
+
+
+def example_2_basic_parallel_reads():
+    """
+    Example 2: Manual control with max_workers (traditional approach).
+
+    Process multiple FASTQ files concurrently using max_workers.
+    Power users can still set max_workers and compression_threads separately.
+    """
+    print("\n" + "=" * 80)
+    print("Example 2: Manual Control with max_workers")
+    print("=" * 80)
+
+    # Load configuration
+    config = ConfigManager.load("test_configs/parallel_reads.json")
+
+    # Configure parallel processing manually
+    settings = ReadValidator.Settings()
+    settings = settings.update(
+        max_workers=4,  # Use 4 parallel workers
+        compression_threads=2,  # Use 2 threads per worker for compression
+        validation_level='trust',  # Fast validation
+        coding_type='gz'  # Compress output
+    )
+
+    print("\nUsing manual control:")
+    print("  - max_workers=4: Process 4 files concurrently")
+    print("  - compression_threads=2: Each worker uses 2 threads for compression")
+    print("  - Total threads: 4 × 2 = 8 threads")
 
     # Process all read files in parallel
     results = validate_reads(config.reads, config.output_dir, settings)
@@ -66,14 +126,15 @@ def example_1_basic_parallel_reads():
             print(f"  - {result['filename']}: {result['error']}")
 
 
-def example_2_parallel_genomes():
+def example_3_parallel_genomes():
     """
-    Example 2: Process reference and modified genomes in parallel.
+    Example 3: Process reference and modified genomes in parallel.
 
     Useful when you have multiple genome files to validate.
+    Uses the unified threads parameter for simplicity.
     """
     print("\n" + "=" * 80)
-    print("Example 2: Parallel Genome Processing")
+    print("Example 3: Parallel Genome Processing with Unified Threads")
     print("=" * 80)
 
     # Load configuration
@@ -90,13 +151,16 @@ def example_2_parallel_genomes():
         print("No genome files found in config")
         return
 
-    # Configure parallel processing
+    # Configure parallel processing with unified threads
     settings = GenomeValidator.Settings()
     settings = settings.update(
-        max_workers=2,  # 2 workers for 2 genomes
+        threads=4,  # Automatically splits: 2 genomes → 2 workers × 2 threads each
         coding_type='gz',
         plasmid_split=True
     )
+
+    print(f"\nProcessing {len(genome_list)} genomes with threads=4")
+    print("  - Smart split: 2 workers × 2 compression threads each")
 
     # Process in parallel
     results = validate_genomes(genome_list, config.output_dir, settings)
@@ -110,18 +174,18 @@ def example_2_parallel_genomes():
             print(f"  Error: {result['error']}")
 
 
-def example_3_optimal_performance():
+def example_4_optimal_performance():
     """
-    Example 3: Combine all optimizations for maximum performance.
+    Example 4: Combine all optimizations for maximum performance.
 
     Demonstrates combining:
-    - File-level parallelization (max_workers)
+    - Unified threads parameter (automatic splitting)
     - Trust mode validation (validation_level='trust')
-    - Parallel compression tools (pigz/pbzip2)
-    - User-specified compression threads
+    - Parallel compression tools (pigz/pbzip2 auto-detected)
+    - Config-level threads specification
     """
     print("\n" + "=" * 80)
-    print("Example 3: Maximum Performance Configuration")
+    print("Example 4: Maximum Performance Configuration")
     print("=" * 80)
 
     config = ConfigManager.load("test_configs/large_dataset.json")
@@ -129,19 +193,18 @@ def example_3_optimal_performance():
     # Get compression threads from config if available
     config_threads = config.get_threads() if hasattr(config, 'get_threads') else None
 
-    # Configure for maximum performance
+    # Configure for maximum performance using unified threads
     settings = ReadValidator.Settings()
     settings = settings.update(
-        max_workers=4,  # File-level parallelization
+        threads=8,  # Automatic split: 4 files → 4 workers × 2 threads each
         validation_level='trust',  # Fast validation (10-15x speedup)
-        coding_type='gz',  # Use gzip compression
-        compression_threads=8  # Use 8 threads for pigz
+        coding_type='gz'  # Use gzip compression
     )
 
     print("Performance optimizations enabled:")
-    print(f"  - File-level parallelization: {settings.max_workers} workers")
+    print(f"  - Unified threads: {settings.threads} (automatically split)")
     print(f"  - Validation level: {settings.validation_level} (10-15x faster)")
-    print(f"  - Compression threads: {settings.compression_threads} (uses pigz if available)")
+    print(f"  - Parallel compression: pigz/pbzip2 auto-detected")
     print("\nExpected speedup for 8 large FASTQ files:")
     print("  - Baseline (sequential, strict): ~240 seconds")
     print("  - With optimizations: ~15-20 seconds (12-16x faster)")
@@ -151,14 +214,14 @@ def example_3_optimal_performance():
     print(f"\n✓ Processed {len(results)} files")
 
 
-def example_4_error_handling():
+def example_5_error_handling():
     """
-    Example 4: Handling errors in parallel mode.
+    Example 5: Handling errors in parallel mode.
 
     Shows how individual file failures don't stop other files.
     """
     print("\n" + "=" * 80)
-    print("Example 4: Error Handling in Parallel Mode")
+    print("Example 5: Error Handling in Parallel Mode")
     print("=" * 80)
 
     config = ConfigManager.load("test_configs/mixed_quality.json")
@@ -190,9 +253,9 @@ def example_4_error_handling():
     print("All files are processed, and errors are collected at the end.")
 
 
-def example_5_sequential_fallback():
+def example_6_sequential_fallback():
     """
-    Example 5: Automatic fallback to sequential processing.
+    Example 6: Automatic fallback to sequential processing.
 
     Shows when parallel processing is not used:
     - Only 1 file
@@ -200,7 +263,7 @@ def example_5_sequential_fallback():
     - max_workers = 1
     """
     print("\n" + "=" * 80)
-    print("Example 5: Sequential Processing (Automatic Fallback)")
+    print("Example 6: Sequential Processing (Automatic Fallback)")
     print("=" * 80)
 
     config = ConfigManager.load("test_configs/single_file.json")
@@ -237,38 +300,45 @@ def main():
     print()
 
     try:
-        example_1_basic_parallel_reads()
+        example_1_unified_threads_parameter()
     except Exception as e:
         print(f"Example 1 skipped: {e}")
 
     try:
-        example_2_parallel_genomes()
+        example_2_basic_parallel_reads()
     except Exception as e:
         print(f"Example 2 skipped: {e}")
 
     try:
-        example_3_optimal_performance()
+        example_3_parallel_genomes()
     except Exception as e:
         print(f"Example 3 skipped: {e}")
 
     try:
-        example_4_error_handling()
+        example_4_optimal_performance()
     except Exception as e:
         print(f"Example 4 skipped: {e}")
 
     try:
-        example_5_sequential_fallback()
+        example_5_error_handling()
     except Exception as e:
         print(f"Example 5 skipped: {e}")
+
+    try:
+        example_6_sequential_fallback()
+    except Exception as e:
+        print(f"Example 6 skipped: {e}")
 
     print("\n" + "=" * 80)
     print("Key Takeaways:")
     print("=" * 80)
-    print("1. Set max_workers=N to process N files concurrently")
-    print("2. Automatic fallback to sequential for single files")
-    print("3. Individual file errors don't stop other files")
-    print("4. Combine with validation_level='trust' for maximum speed")
-    print("5. Thread-safe logging works correctly in parallel mode")
+    print("1. Use threads=N for automatic splitting (RECOMMENDED)")
+    print("2. threads parameter adapts to number of files automatically")
+    print("3. Power users can still use max_workers + compression_threads manually")
+    print("4. Automatic fallback to sequential for single files")
+    print("5. Individual file errors don't stop other files")
+    print("6. Combine with validation_level='trust' for maximum speed")
+    print("7. Thread-safe logging works correctly in parallel mode")
     print("=" * 80)
 
 

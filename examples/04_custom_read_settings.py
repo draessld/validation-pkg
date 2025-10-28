@@ -134,6 +134,24 @@ def main():
     print("=" * 70)
     print(f"All validated files saved to: {output_dir}")
     print("=" * 70)
+    print()
+
+    # Tip about config-level settings
+    print("💡 TIP: You can also specify these settings in config.json!")
+    print("Example config.json:")
+    print('{')
+    print('  "reads": [')
+    print('    {')
+    print('      "filename": "reads.fastq.gz",')
+    print('      "ngs_type": "illumina",')
+    print('      "validation_level": "trust",')
+    print('      "check_invalid_chars": false,')
+    print('      "outdir_by_ngs_type": true')
+    print('    }')
+    print('  ]')
+    print('}')
+    print()
+    print("See example 12_config_validation_levels.py for details on config-level settings.")
 
 if __name__ == "__main__":
     main()

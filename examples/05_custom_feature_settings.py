@@ -125,6 +125,22 @@ def main():
     print("=" * 70)
     print(f"All validated files saved to: {output_dir}")
     print("=" * 70)
+    print()
+
+    # Tip about config-level settings
+    print("💡 TIP: You can also specify these settings in config.json!")
+    print("Example config.json:")
+    print('{')
+    print('  "ref_feature_filename": {')
+    print('    "filename": "features.gff",')
+    print('    "validation_level": "strict",')
+    print('    "sort_by_position": true,')
+    print('    "check_coordinates": true,')
+    print('    "replace_id_with": "chr1"')
+    print('  }')
+    print('}')
+    print()
+    print("See example 12_config_validation_levels.py for details on config-level settings.")
 
 if __name__ == "__main__":
     main()

@@ -115,6 +115,21 @@ def main():
     print("=" * 70)
     print(f"All validated files saved to: {output_dir}")
     print("=" * 70)
+    print()
+
+    # Tip about config-level settings
+    print("💡 TIP: You can also specify these settings in config.json!")
+    print("Example config.json:")
+    print('{')
+    print('  "ref_genome_filename": {')
+    print('    "filename": "genome.fasta",')
+    print('    "validation_level": "trust",')
+    print('    "min_sequence_length": 500,')
+    print('    "replace_id_with": "chr"')
+    print('  }')
+    print('}')
+    print()
+    print("See example 12_config_validation_levels.py for details on config-level settings.")
 
 if __name__ == "__main__":
     main()

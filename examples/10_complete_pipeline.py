@@ -22,14 +22,15 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from validation_pkg import (
-    ValidationCoordinator,
     ConfigManager,
     GenomeValidator,
     ReadValidator,
     FeatureValidator,
     validate_genome,
+    validate_genomes,
     validate_reads,
-    validate_feature
+    validate_feature,
+    validate_features_list
 )
 from validation_pkg.exceptions import ValidationError
 
@@ -66,9 +67,13 @@ def main():
         genome_output = output_base / "genomes"
         genome_output.mkdir(exist_ok=True)
 
+        # Collect all genomes to validate
+        genomes_to_validate = []
+
         # Reference genome: strict validation with QC
         if config.ref_genome:
-            print(f"Validating reference genome: {config.ref_genome.filename}")
+            print(f"Preparing reference genome: {config.ref_genome.filename}")
+            # Settings can be set per-file using update with config
             ref_settings = GenomeValidator.Settings().update(
                 validation_level='strict',
                 min_sequence_length=100,
@@ -76,31 +81,35 @@ def main():
                 coding_type='gz',
                 output_filename_suffix='validated'
             )
-            validate_genome(config.ref_genome, genome_output, ref_settings)
-            print("  ✓ Reference genome validated")
+            genomes_to_validate.append((config.ref_genome, ref_settings))
 
         # Modified genome: trust mode for faster processing
         if config.mod_genome:
-            print(f"Validating modified genome: {config.mod_genome.filename}")
+            print(f"Preparing modified genome: {config.mod_genome.filename}")
             mod_settings = GenomeValidator.Settings().update(
                 validation_level='trust',
                 coding_type='gz',
                 output_filename_suffix='validated'
             )
-            validate_genome(config.mod_genome, genome_output, mod_settings)
-            print("  ✓ Modified genome validated")
+            genomes_to_validate.append((config.mod_genome, mod_settings))
 
         # Plasmid: split into separate files
         if config.ref_plasmid:
-            print(f"Validating plasmid: {config.ref_plasmid.filename}")
+            print(f"Preparing plasmid: {config.ref_plasmid.filename}")
             plasmid_settings = GenomeValidator.Settings().update(
                 validation_level='strict',
                 plasmid_split=True,
                 coding_type='gz',
                 output_subdir_name='plasmids'
             )
-            validate_genome(config.ref_plasmid, genome_output, plasmid_settings)
-            print("  ✓ Plasmid validated and split")
+            genomes_to_validate.append((config.ref_plasmid, plasmid_settings))
+
+        # Validate all genomes
+        if genomes_to_validate:
+            print(f"\nValidating {len(genomes_to_validate)} genome(s)...")
+            for genome_config, settings in genomes_to_validate:
+                validate_genome(genome_config, genome_output, settings)
+                print(f"  ✓ {genome_config.filename} validated")
 
         print()
 
@@ -153,9 +162,12 @@ def main():
         feature_output = output_base / "features"
         feature_output.mkdir(exist_ok=True)
 
+        # Collect all features to validate
+        features_to_validate = []
+
         # Reference features: strict validation with sorting
         if config.ref_feature:
-            print(f"Validating reference features: {config.ref_feature.filename}")
+            print(f"Preparing reference features: {config.ref_feature.filename}")
             ref_feat_settings = FeatureValidator.Settings().update(
                 validation_level='strict',
                 sort_by_position=True,
@@ -164,20 +176,25 @@ def main():
                 coding_type='gz',
                 output_filename_suffix='validated'
             )
-            validate_feature(config.ref_feature, feature_output, ref_feat_settings)
-            print("  ✓ Reference features validated and sorted")
+            features_to_validate.append((config.ref_feature, ref_feat_settings))
 
         # Modified features: trust mode
         if config.mod_feature:
-            print(f"Validating modified features: {config.mod_feature.filename}")
+            print(f"Preparing modified features: {config.mod_feature.filename}")
             mod_feat_settings = FeatureValidator.Settings().update(
                 validation_level='trust',
                 sort_by_position=True,
                 coding_type='gz',
                 output_filename_suffix='validated'
             )
-            validate_feature(config.mod_feature, feature_output, mod_feat_settings)
-            print("  ✓ Modified features validated")
+            features_to_validate.append((config.mod_feature, mod_feat_settings))
+
+        # Validate all features
+        if features_to_validate:
+            print(f"\nValidating {len(features_to_validate)} feature file(s)...")
+            for feature_config, settings in features_to_validate:
+                validate_feature(feature_config, feature_output, settings)
+                print(f"  ✓ {feature_config.filename} validated")
 
         print()
 

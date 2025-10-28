@@ -79,7 +79,8 @@ validate_genome(config.ref_genome, output_dir, settings)
     "validation_level": "trust",
     "min_sequence_length": 500,
     "replace_id_with": "chr",
-    "coding_type": "gz"
+    "coding_type": "gz",
+    "threads": 4
   },
   "reads": [
     {
@@ -93,6 +94,9 @@ validate_genome(config.ref_genome, output_dir, settings)
     "filename": "features.gff.gz",
     "sort_by_position": true,
     "coding_type": "gz"
+  },
+  "options": {
+    "threads": 8
   }
 }
 ```
@@ -161,7 +165,10 @@ settings = GenomeValidator.Settings().update(
     is_plasmid=False,                   # Treat all as plasmids
     coding_type='gz',                   # Output compression: 'gz', 'bz2', or None
     output_filename_suffix='validated', # Add suffix to output filename
-    output_subdir_name='genomes'        # Output subdirectory
+    output_subdir_name='genomes',       # Output subdirectory
+    threads=8,                          # Unified threads parameter (automatic split)
+    max_workers=None,                   # File-level parallelization (power users)
+    compression_threads=None            # Compression-level threads (power users)
 )
 ```
 
@@ -177,7 +184,10 @@ settings = ReadValidator.Settings().update(
     ignore_bam=True,                    # Skip BAM files (don't convert)
     outdir_by_ngs_type=True,            # Organize by NGS type (illumina/ont/pacbio)
     coding_type='gz',                   # Output compression: 'gz', 'bz2', or None
-    output_filename_suffix='validated'  # Add suffix to output filename
+    output_filename_suffix='validated', # Add suffix to output filename
+    threads=8,                          # Unified threads parameter (automatic split)
+    max_workers=None,                   # File-level parallelization (power users)
+    compression_threads=None            # Compression-level threads (power users)
 )
 ```
 
@@ -191,7 +201,10 @@ settings = FeatureValidator.Settings().update(
     allow_zero_length=False,            # Allow zero-length features
     replace_id_with='chr1',             # Replace sequence name field
     coding_type='gz',                   # Output compression: 'gz', 'bz2', or None
-    output_filename_suffix='validated'  # Add suffix to output filename
+    output_filename_suffix='validated', # Add suffix to output filename
+    threads=8,                          # Unified threads parameter (automatic split)
+    max_workers=None,                   # File-level parallelization (power users)
+    compression_threads=None            # Compression-level threads (power users)
 )
 ```
 
@@ -334,6 +347,76 @@ settings = GenomeValidator.Settings().update(
 )
 ```
 
+### 6. Parallel Processing (Multiple Files)
+```python
+from validation_pkg import validate_reads
+
+# RECOMMENDED: Unified threads parameter (automatic splitting)
+settings = ReadValidator.Settings().update(
+    threads=8,  # Automatically splits based on file count
+    validation_level='trust'
+)
+validate_reads(config.reads, output_dir, settings)
+# 4 files → 4 workers × 2 compression threads each
+# 1 file → 1 worker × 8 compression threads
+# 8+ files → 8 workers × 1 compression thread each
+
+# ADVANCED: Manual control (power users)
+settings = ReadValidator.Settings().update(
+    max_workers=4,  # Process 4 files concurrently
+    compression_threads=2,  # Each uses 2 threads for compression
+    validation_level='trust'
+)
+```
+
+## Parallel Processing
+
+### Unified Threads Parameter (Recommended)
+
+The `threads` parameter automatically splits between file-level and compression-level parallelization:
+
+```python
+# Simple approach - automatic optimization
+settings = ReadValidator.Settings().update(
+    threads=8,  # Auto-splits intelligently
+    validation_level='trust'
+)
+validate_reads(config.reads, output_dir, settings)
+```
+
+**How it works:**
+- 1 file: All threads for compression (1 worker × 8 threads)
+- 4 files: Balanced split (4 workers × 2 threads each)
+- 8+ files: Prioritize file parallelization (8 workers × 1 thread each)
+
+### Manual Control (Power Users)
+
+You can still set `max_workers` and `compression_threads` separately:
+
+```python
+settings = ReadValidator.Settings().update(
+    max_workers=4,  # File-level parallelization
+    compression_threads=2,  # Per-file compression threads
+    validation_level='trust'
+)
+```
+
+### Config-Level Threads
+
+Specify threads in config.json:
+
+```json
+{
+  "ref_genome_filename": {
+    "filename": "genome.fasta",
+    "threads": 4
+  },
+  "options": {
+    "threads": 8
+  }
+}
+```
+
 ## Validation Report
 
 ```python
@@ -419,10 +502,12 @@ output_dir/
 ## Performance Tips
 
 1. **Use `trust` mode for large files** - 10-15x faster than `strict`
-2. **Enable compression** (`coding_type='gz'`) - saves disk space
-3. **Use `outdir_by_ngs_type`** for reads - organizes by platform
-4. **Batch similar files** - reuse settings objects
-5. **Use `minimal` mode** only for archiving (no validation)
+2. **Use parallel processing for multiple files** - Set `threads=8` for automatic optimization (35-40x faster when combined with trust mode)
+3. **Enable compression** (`coding_type='gz'`) - saves disk space, pigz/pbzip2 auto-detected for 3-4x compression speedup
+4. **Use `outdir_by_ngs_type`** for reads - organizes by platform
+5. **Batch similar files** - reuse settings objects
+6. **Use config-level settings** - specify validation settings in config.json for production
+7. **Use `minimal` mode** only for archiving (no validation)
 
 ## Decision Tree
 
@@ -479,22 +564,30 @@ ValidationError (base)
 ```python
 from validation_pkg import (
     validate_genome,
+    validate_genomes,  # Parallel genome processing
     validate_read,
-    validate_reads,
-    validate_feature
+    validate_reads,  # Parallel read processing
+    validate_feature,
+    validate_features_list  # Parallel feature processing
 )
 
 # Single genome
 validate_genome(genome_config, output_dir, settings)
 
+# Multiple genomes (parallel)
+validate_genomes(genome_configs, output_dir, settings)
+
 # Single read
 validate_read(read_config, output_dir, settings)
 
-# Multiple reads
+# Multiple reads (parallel)
 validate_reads(read_configs, output_dir, settings)
 
 # Single feature
 validate_feature(feature_config, output_dir, settings)
+
+# Multiple features (parallel)
+validate_features_list(feature_configs, output_dir, settings)
 ```
 
 ## Examples Directory
@@ -511,6 +604,9 @@ See the `examples/` directory for complete working examples:
 - `08_error_handling.py` - Exception handling
 - `09_settings_patterns.py` - Settings system details
 - `10_complete_pipeline.py` - Production-ready template
+- `11_directory_based_reads.py` - Directory-based read validation
+- `12_config_validation_levels.py` - Config-level settings
+- `13_parallel_processing.py` - Parallel file processing
 
 ## Getting Help
 
