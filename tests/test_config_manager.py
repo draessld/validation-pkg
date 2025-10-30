@@ -64,40 +64,41 @@ class TestConfigManager:
             ],
             "ref_feature_filename": {"filename": "ref_features.gff"},
             "mod_feature_filename": {"filename": "mod_features.bed"},
-            "options": {"threads": 8, "verbose": True}
+            "options": {"threads": 8, "validation_level": "trust"}
         }
-        
+
         config_file = temp_dir / "config.json"
         config_file.write_text(json.dumps(config, indent=2))
         return config_file
-    
+
     def test_load_minimal_valid_config(self, valid_config_minimal):
         """Test loading minimal valid configuration."""
         config = ConfigManager.load(str(valid_config_minimal))
-        
+
         assert config.ref_genome is not None
         assert config.mod_genome is not None
         assert len(config.reads) == 1
         assert config.reads[0].ngs_type == "illumina"
         assert config.ref_plasmid is None
         assert config.mod_plasmid is None
-        
+
         # Check absolute paths are set
         assert config.ref_genome.filepath.is_absolute()
         assert config.ref_genome.filepath.exists()
         assert config.mod_genome.filepath.is_absolute()
         assert config.reads[0].filepath.is_absolute()
-    
+
     def test_load_full_valid_config(self, valid_config_full):
         """Test loading full configuration with all fields."""
         config = ConfigManager.load(str(valid_config_full))
-        
+
         assert config.ref_plasmid is not None
         assert config.mod_plasmid is not None
         assert len(config.reads) == 2
         assert config.ref_feature is not None
         assert config.mod_feature is not None
         assert config.options["threads"] == 8
+        assert config.options["validation_level"] == "trust"
         
         # Check all absolute paths are set
         assert config.ref_genome.filepath.is_absolute()
@@ -1133,6 +1134,167 @@ class TestConfigValidatorSettings:
         assert loaded_config.ref_genome.settings_dict == {}
         assert loaded_config.mod_genome.settings_dict == {}
         assert loaded_config.reads[0].settings_dict == {}
+
+
+class TestSecurityPathTraversal:
+    """Security tests for path traversal protection."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    def test_path_traversal_blocked_in_genome_config(self, temp_dir):
+        """Test that path traversal attacks are blocked in genome config."""
+        # Create valid files
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        # Try to access parent directory using path traversal
+        config = {
+            "ref_genome_filename": {"filename": "../../../etc/passwd"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        # Should raise ConfigurationError for path traversal
+        with pytest.raises(ConfigurationError) as exc_info:
+            ConfigManager.load(str(config_file))
+
+        assert "Path traversal detected" in str(exc_info.value)
+        assert "etc/passwd" in str(exc_info.value)
+
+    def test_path_traversal_blocked_in_read_config(self, temp_dir):
+        """Test that path traversal attacks are blocked in read config."""
+        # Create valid files
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+
+        # Try to access parent directory in reads
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "../../../../etc/shadow", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        # Should raise ConfigurationError for path traversal
+        with pytest.raises(ConfigurationError) as exc_info:
+            ConfigManager.load(str(config_file))
+
+        assert "Path traversal detected" in str(exc_info.value)
+
+    def test_path_traversal_blocked_in_feature_config(self, temp_dir):
+        """Test that path traversal attacks are blocked in feature config."""
+        # Create valid files
+        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        # Try to access parent directory in feature files
+        config = {
+            "ref_genome_filename": {"filename": "ref.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}],
+            "ref_feature_filename": {"filename": "../../sensitive_data.gff"}
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        # Should raise ConfigurationError for path traversal
+        with pytest.raises(ConfigurationError) as exc_info:
+            ConfigManager.load(str(config_file))
+
+        assert "Path traversal detected" in str(exc_info.value)
+
+    def test_symlink_blocked(self, temp_dir):
+        """Test that symlinks outside config directory are blocked."""
+        import os
+
+        # Create a file outside the temp directory (in a subdirectory)
+        outside_dir = temp_dir.parent / "outside"
+        outside_dir.mkdir(exist_ok=True)
+        sensitive_file = outside_dir / "sensitive.fasta"
+        sensitive_file.write_text(">secret\nATCG\n")
+
+        # Create symlink in temp_dir pointing to outside file
+        symlink_path = temp_dir / "symlink.fasta"
+        try:
+            os.symlink(sensitive_file, symlink_path)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        # Create other valid files
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        config = {
+            "ref_genome_filename": {"filename": "symlink.fasta"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        # Should raise ConfigurationError because symlink resolves outside config_dir
+        with pytest.raises(ConfigurationError) as exc_info:
+            ConfigManager.load(str(config_file))
+
+        assert "Path traversal detected" in str(exc_info.value)
+
+    def test_normal_relative_paths_allowed(self, temp_dir):
+        """Test that normal relative paths within config directory are allowed."""
+        # Create subdirectory with files
+        subdir = temp_dir / "data"
+        subdir.mkdir()
+        (subdir / "ref.fasta").write_text(">seq1\nATCG\n")
+        (subdir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (subdir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        # Use relative path to subdirectory (this should be allowed)
+        config = {
+            "ref_genome_filename": {"filename": "data/ref.fasta"},
+            "mod_genome_filename": {"filename": "data/mod.fasta"},
+            "reads": [{"filename": "data/reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        # Should succeed - files are within config directory
+        loaded_config = ConfigManager.load(str(config_file))
+        assert loaded_config.ref_genome.filename == "ref.fasta"
+        assert "data" in str(loaded_config.ref_genome.filepath)
+
+    def test_absolute_paths_within_config_dir_blocked(self, temp_dir):
+        """Test that absolute paths are normalized and checked for traversal."""
+        # Create file
+        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
+        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
+
+        # Try to use absolute path to /etc/passwd
+        config = {
+            "ref_genome_filename": {"filename": "/etc/passwd"},
+            "mod_genome_filename": {"filename": "mod.fasta"},
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+        }
+
+        config_file = temp_dir / "config.json"
+        config_file.write_text(json.dumps(config, indent=2))
+
+        # Should raise ConfigurationError for path traversal
+        with pytest.raises(ConfigurationError) as exc_info:
+            ConfigManager.load(str(config_file))
+
+        assert "Path traversal detected" in str(exc_info.value)
 
 
 if __name__ == "__main__":

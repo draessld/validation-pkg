@@ -19,7 +19,7 @@ Classes:
 """
 
 from pathlib import Path
-from typing import Optional, List, IO
+from typing import Optional, List, IO, Union
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -97,8 +97,6 @@ class GenomeValidator:
               - If both False: all sequences saved to main output file
             - Main selection (main_longest/main_first) only applies when is_plasmid=False
         """
-        validation_level: str = 'strict'  # 'strict', 'trust', or 'minimal'
-
         # Validation thresholds
         allow_empty_sequences: bool = False #   Raise ERROR
         allow_empty_id: bool = False    #   Raise ERROR
@@ -119,18 +117,6 @@ class GenomeValidator:
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
 
-        # Unified threads parameter (None = auto-detect)
-        # If specified, automatically splits between max_workers and compression_threads
-        threads: Optional[int] = None
-
-        # Compression threads (None = auto-detect)
-        # Explicit setting overrides thread splitting from 'threads'
-        compression_threads: Optional[int] = None
-
-        # Parallel processing (None = no parallelization, int = max workers)
-        # Explicit setting overrides thread splitting from 'threads'
-        max_workers: Optional[int] = None
-
         def __post_init__(self):
             """Validate settings after initialization."""
             if self.plasmid_split and self.plasmids_to_one:
@@ -147,7 +133,7 @@ class GenomeValidator:
                     "main_first selects the first sequence as main."
                 )
 
-    def __init__(self, genome_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
+    def __init__(self, genome_config, settings: Optional[Settings] = None) -> None:
         """
         Initialize genome validator.
 
@@ -155,107 +141,30 @@ class GenomeValidator:
             genome_config: GenomeConfig object from ConfigManager with file info
             output_dir: Directory for output files (Path object)
             settings: Settings object with validation parameters.
-                If None, uses settings from genome_config.settings_dict (if available),
-                otherwise uses defaults. If provided, merges with config settings
-                (user settings take precedence).
-
-        Note: In future versions, output_dir may be moved to settings.
-
-        Settings precedence (highest to lowest):
-            1. Explicit user settings parameter
-            2. Config file settings (genome_config.settings_dict)
-            3. Default Settings values
-
-        Example:
-            >>> # Example 1: Use config settings (if available)
-            >>> config = ConfigManager.load("config.json")
-            >>> validator = GenomeValidator(config.ref_genome, output_dir)
-            >>> # Uses validation_level, threads, etc. from config.json
-            >>>
-            >>> # Example 2: Override specific settings
-            >>> settings = GenomeValidator.Settings()
-            >>> settings = settings.update(replace_id_with="chr1")
-            >>> validator = GenomeValidator(config.ref_genome, output_dir, settings)
-            >>> # Uses replace_id_with='chr1' (user) + other settings from config
         """
         self.logger = get_logger()
+
+        # From genome global configuration
         self.genome_config = genome_config
-        self.output_dir = output_dir
-
-        # Apply 4-layer settings precedence:
-        # Layer 1: Defaults (lowest priority)
-        # Layer 2: Global options (validation_level, threads only)
-        # Layer 3: File-level config settings (all fields)
-        # Layer 4: User settings (highest priority)
-
-        # Layer 1: Start with defaults
-        merged_dict = self.Settings().to_dict()
-
-        # Layer 2: Apply global options (only validation_level and threads)
-        if genome_config.global_options:
-            for key, value in genome_config.global_options.items():
-                if key in merged_dict:
-                    merged_dict[key] = value
-                    self.logger.debug(f"Applied global option: {key}={value}")
-
-        # Layer 3: Apply file-level config settings (override global, all fields allowed)
-        if genome_config.settings_dict:
-            for key, value in genome_config.settings_dict.items():
-                # Warn if file-level overrides global option
-                if key in genome_config.global_options:
-                    old_value = genome_config.global_options[key]
-                    self.logger.warning(
-                        f"File-level setting '{key}={value}' overrides global option '{key}={old_value}' "
-                        f"for {genome_config.filename}"
-                    )
-                merged_dict[key] = value
-                self.logger.debug(f"Applied file-level setting: {key}={value}")
-
-        # Layer 4: Apply user settings (override everything)
-        if settings is not None:
-            user_dict = settings.to_dict()
-
-            # Log warnings for overrides
-            overridden = []
-            for key, new_value in user_dict.items():
-                old_value = merged_dict.get(key)
-                if old_value != new_value:
-                    # Determine source of overridden value
-                    if key in genome_config.settings_dict:
-                        source = "file-level setting"
-                    elif key in genome_config.global_options:
-                        source = "global option"
-                    else:
-                        source = "default"
-                    overridden.append(f"{key}: {old_value} ({source}) → {new_value} (user)")
-                merged_dict[key] = new_value
-
-            if overridden:
-                self.logger.warning(
-                    f"User-provided settings override config settings: {'; '.join(overridden)}"
-                )
-
-        # Create final settings object
-        self.settings = self.Settings.from_dict(merged_dict)
-
-        # Validate validation_level setting
-        valid_levels = {'strict', 'trust', 'minimal'}
-        if self.settings.validation_level not in valid_levels:
-            raise ValueError(
-                f"Invalid validation_level '{self.settings.validation_level}'. "
-                f"Must be one of: {', '.join(valid_levels)}"
-            )
-
-        # Log settings being used
-        self.logger.debug(f"Initializing GenomeValidator with settings:\n{self.settings}")
-
-        # Resolved paths
+        self.output_dir = genome_config.output_dir
+        self.validation_level = genome_config.global_options.get("validation_level")   
+        self.threads = genome_config.global_options.get("threads") 
         self.input_path = genome_config.filepath
+
+        # From settings
+        self.settings = settings if not None else self.Settings() 
 
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
 
-    def validate(self) -> None:
+    def __post_init__(self):
+        if not self.validation_level:
+            self.validation_level = 'strict'    #   default global value
+
+        if not self.threads:
+            self.threads = 1    #   default global value
+
+    def run(self) -> None:
         """
         Main validation and processing workflow.
 
@@ -324,10 +233,10 @@ class GenomeValidator:
         - 'trust': Parse all sequences, validate only first one
         - 'minimal': Skip parsing entirely
         """
-        self.logger.debug(f"Parsing {self.genome_config.detected_format} file (validation_level={self.settings.validation_level})...")
+        self.logger.debug(f"Parsing {self.genome_config.detected_format} file (validation_level={self.validation_level})...")
 
         # Minimal mode - skip parsing
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.info("Minimal validation mode - skipping file parsing")
             self.sequences = []
             return
@@ -350,7 +259,7 @@ class GenomeValidator:
                 )
                 raise GenomeValidationError(error_msg)
 
-            if self.settings.validation_level == 'trust':
+            if self.validation_level == 'trust':
                 self.logger.info(f"Trust mode - parsed {len(self.sequences)} sequence(s), will validate first only")
             else:
                 self.logger.debug(f"Parsed {len(self.sequences)} sequence(s)")
@@ -393,12 +302,12 @@ class GenomeValidator:
         self.logger.debug("Validating sequences...")
 
         # Minimal mode - no sequences to validate
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - skipping sequence validation")
             return
 
         # Trust mode - validate only first sequence
-        if self.settings.validation_level == 'trust':
+        if self.validation_level == 'trust':
             self.logger.debug("Trust mode - validating first sequence only")
             if len(self.sequences) > 0:
                 record = self.sequences[0]
@@ -482,7 +391,7 @@ class GenomeValidator:
         self.logger.debug("Applying editing specifications from settings...")
 
         # Minimal mode - skip edits, file will be copied as-is
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - skipping edits")
             return
 
@@ -610,7 +519,7 @@ class GenomeValidator:
             index: Index number to append to filename
         """
         # Determine output directory (with optional subdirectory)
-        output_dir = self.output_dir
+        output_dir = self.genome_config.output_dir
         if self.settings.output_subdir_name and self.settings.output_subdir_name != "plasmid":
             output_dir = output_dir / self.settings.output_subdir_name
 
@@ -650,7 +559,7 @@ class GenomeValidator:
             coding_enum = CT.BZIP2
 
         # Use optimized compression writer
-        with open_compressed_writer(plasmid_path, coding_enum, threads=self.settings.compression_threads) as handle:
+        with open_compressed_writer(plasmid_path, coding_enum, threads=self.threads) as handle:
             SeqIO.write(plasmid_sequences, handle, 'fasta')
 
         self.logger.info(f"Plasmid sequences saved: {plasmid_path}")
@@ -692,7 +601,7 @@ class GenomeValidator:
         self.logger.debug("Saving output file...")
 
         # Determine output directory (with optional subdirectory)
-        output_dir = self.output_dir
+        output_dir = self.genome_config.output_dir
         if self.settings.output_subdir_name:
             output_dir = output_dir / self.settings.output_subdir_name
 
@@ -723,7 +632,7 @@ class GenomeValidator:
 
         # Minimal mode - copy file as-is without parsing
         # Required: FASTA format + coding must match settings.coding_type
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - validating format and coding requirements")
 
             # Check format - must be FASTA
@@ -794,7 +703,7 @@ class GenomeValidator:
             coding_enum = CT.BZIP2
 
         # Use optimized compression writer
-        with open_compressed_writer(output_path, coding_enum, threads=self.settings.compression_threads) as handle:
+        with open_compressed_writer(output_path, coding_enum, threads=self.threads) as handle:
             SeqIO.write(self.sequences, handle, 'fasta')
 
         self.logger.info(f"Output saved: {output_path}")

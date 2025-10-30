@@ -14,6 +14,7 @@ from .file_handler import (
     get_file_format,
     calculate_thread_distribution
 )
+from .settings import UNSET
 
 __all__ = [
     'open_file',
@@ -21,4 +22,5 @@ __all__ = [
     'get_base_filename',
     'get_file_format',
     'calculate_thread_distribution',
+    'UNSET',
 ]

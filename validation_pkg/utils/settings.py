@@ -17,6 +17,27 @@ from copy import deepcopy
 from typing import Dict, Any
 from abc import ABC
 
+# ===== Sentinel Value for Unspecified Settings =====
+class _UnsetType:
+    """
+    Sentinel type to distinguish 'not specified' from None.
+
+    Used for smart merging of settings - when a setting is UNSET,
+    it won't override lower-priority values during merge.
+
+    Example:
+        threads: Optional[int] = UNSET  # Not specified by user
+        threads: Optional[int] = None   # Explicitly set to None by user
+    """
+    def __repr__(self):
+        return '<UNSET>'
+
+    def __bool__(self):
+        return False
+
+# Singleton instance
+UNSET = _UnsetType()
+
 # ===== Base Settings Class =====
 class BaseSettings(ABC):
     """
@@ -101,18 +122,27 @@ class BaseSettings(ABC):
 
         return new_settings
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, include_unset: bool = True) -> Dict[str, Any]:
         """
         Convert settings to dictionary for serialization.
 
+        Args:
+            include_unset: If False, exclude fields with UNSET values
+
         Returns:
-            Dictionary with all settings
+            Dictionary with all settings (or only set values if include_unset=False)
 
         Example:
             >>> settings.to_dict()
             {'plasmid_split': True, 'sequence_prefix': None, ...}
+            >>> settings.to_dict(include_unset=False)
+            {'plasmid_split': True}  # Excludes UNSET fields
         """
-        return asdict(self)
+        result = asdict(self)
+        if not include_unset:
+            # Filter out UNSET values
+            result = {k: v for k, v in result.items() if not isinstance(v, _UnsetType)}
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):

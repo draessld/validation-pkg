@@ -244,21 +244,21 @@ Load multiple read files from a directory:
 
 All files in `reads_dir/` will be loaded and assigned `ngs_type: "ont"`.
 
-### Advanced Configuration
+### Advanced Configuration with Global Options ⭐ NEW
+
+**New in v0.2.0:** Use the `options` field to set global defaults for all files:
 
 ```json
 {
   "ref_genome_filename": {
     "filename": "reference.fasta.gz",
-    "validation_level": "trust",
     "min_sequence_length": 500,
     "replace_id_with": "chr"
   },
   "reads": [
     {
       "filename": "illumina_R1.fastq.gz",
-      "ngs_type": "illumina",
-      "validation_level": "trust"
+      "ngs_type": "illumina"
     },
     {
       "directory": "ont_reads",
@@ -268,24 +268,45 @@ All files in `reads_dir/` will be loaded and assigned `ngs_type: "ont"`.
   ],
   "ref_feature_filename": {
     "filename": "annotations.gff",
-    "validation_level": "trust",
     "sort_by_position": true
+  },
+  "options": {
+    "threads": 8,
+    "validation_level": "trust"
   }
 }
 ```
 
-**How config-level settings work:**
-- You can specify **any** validator setting directly in config.json alongside file paths
-- Settings are automatically applied when using the functional API (`validate_genome()`, `validate_read()`, `validate_feature()`)
-- If you provide settings in code, they **override** config settings (code takes precedence)
-- Directory-based reads inherit all settings from the directory entry
+**How the 4-layer settings system works:**
+
+1. **Layer 1 (Defaults):** Built-in defaults from Settings dataclass
+2. **Layer 2 (Global options):** `options` field applies to ALL files
+   - Only `threads` and `validation_level` allowed
+   - Prevents mistakes (e.g., can't set `plasmid_split` globally)
+3. **Layer 3 (File-level):** Per-file settings override global
+   - Any Settings field can be specified
+   - WARNING logged when overriding global option
+4. **Layer 4 (User code):** Settings in Python completely replace all config settings
+
+**Example result:**
+- `ref_genome`: Uses `threads=8`, `validation_level='trust'` (from global), plus file-specific settings
+- `illumina_R1`: Uses `threads=8`, `validation_level='trust'` (from global)
+- `ont_reads`: Uses `threads=8` (global), `validation_level='strict'` (file overrides global with WARNING)
+- `ref_feature`: Uses `threads=8`, `validation_level='trust'` (from global), plus file-specific settings
 
 **Available settings:**
-- **Genome files**: `validation_level`, `plasmid_split`, `min_sequence_length`, `replace_id_with`, etc.
-- **Read files**: `validation_level`, `check_invalid_chars`, `allow_duplicate_ids`, `keep_bam`, etc.
-- **Feature files**: `validation_level`, `sort_by_position`, `check_coordinates`, etc.
+- **Global options** (in `options` field): ONLY `threads` and `validation_level`
+- **File-level settings** (per-file): ANY validator setting
+  - **Genome files**: `validation_level`, `plasmid_split`, `min_sequence_length`, `replace_id_with`, etc.
+  - **Read files**: `validation_level`, `check_invalid_chars`, `allow_duplicate_ids`, `keep_bam`, etc.
+  - **Feature files**: `validation_level`, `sort_by_position`, `check_coordinates`, etc.
 
-See each validator's Settings class for the full list of available options.
+**Best practices:**
+- Use global `options` for common settings (threads, validation_level)
+- Override per-file only when needed
+- Avoid passing Settings in Python code unless you need full control (it ignores config!)
+
+See [CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md) for complete documentation.
 
 ---
 

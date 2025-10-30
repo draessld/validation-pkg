@@ -961,6 +961,164 @@ class TestReadValidatorEdgeCases:
         assert len(validator.sequences) == 1
 
 
+class TestSecurityCommandInjection:
+    """
+    Security tests for command injection protection in read validator.
+
+    These tests verify that the _count_lines_fast() method uses Python's
+    native gzip/bz2 libraries instead of shell commands, preventing command
+    injection attacks through malicious filenames.
+    """
+
+    def test_line_counting_uses_python_not_shell_gzip(self, tmp_path):
+        """Test that line counting uses Python gzip library, not shell commands."""
+        # Create a gzip compressed FASTQ file
+        fastq_file = tmp_path / "reads.fastq.gz"
+        content = "@read1\nATCG\n+\nIIII\n@read2\nGCTA\n+\nJJJJ\n"
+        with gzip.open(fastq_file, 'wt') as f:
+            f.write(content)
+
+        # Create read config
+        read_config = ReadConfig(
+            filename="reads.fastq.gz",
+            filepath=fastq_file,
+            ngs_type='illumina',
+            coding_type=CodingType.GZIP,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=tmp_path
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings = ReadValidator.Settings()
+        settings = settings.update(validation_level='strict')
+
+        validator = ReadValidator(read_config, output_dir, settings)
+
+        # Call _count_lines_fast directly
+        line_count = validator._count_lines_fast()
+
+        # Should count correct number of lines (8 lines total)
+        assert line_count == 8
+
+    def test_line_counting_uses_python_not_shell_bzip2(self, tmp_path):
+        """Test that line counting uses Python bz2 library, not shell commands."""
+        # Create a bzip2 compressed FASTQ file
+        fastq_file = tmp_path / "reads.fastq.bz2"
+        content = "@read1\nATCGATCG\n+\nIIIIIIII\n@read2\nGCTAGCTA\n+\nJJJJJJJJ\n"
+        with bz2.open(fastq_file, 'wt') as f:
+            f.write(content)
+
+        # Create read config
+        read_config = ReadConfig(
+            filename="reads.fastq.bz2",
+            filepath=fastq_file,
+            ngs_type='ont',
+            coding_type=CodingType.BZIP2,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=tmp_path
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings = ReadValidator.Settings()
+        settings = settings.update(validation_level='strict')
+
+        validator = ReadValidator(read_config, output_dir, settings)
+
+        # Call _count_lines_fast directly
+        line_count = validator._count_lines_fast()
+
+        # Should count correct number of lines (8 lines total)
+        assert line_count == 8
+
+    def test_line_counting_uncompressed(self, tmp_path):
+        """Test that line counting works for uncompressed files."""
+        # Create an uncompressed FASTQ file
+        fastq_file = tmp_path / "reads.fastq"
+        content = "@read1\nATCG\n+\nIIII\n"
+        fastq_file.write_text(content)
+
+        # Create read config
+        read_config = ReadConfig(
+            filename="reads.fastq",
+            filepath=fastq_file,
+            ngs_type='illumina',
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=tmp_path
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings = ReadValidator.Settings()
+        settings = settings.update(validation_level='strict')
+
+        validator = ReadValidator(read_config, output_dir, settings)
+
+        # Call _count_lines_fast directly
+        line_count = validator._count_lines_fast()
+
+        # Should count correct number of lines (4 lines total)
+        assert line_count == 4
+
+    def test_no_subprocess_import_in_count_lines_fast(self, tmp_path):
+        """
+        Verify that _count_lines_fast doesn't use subprocess module.
+
+        This is a regression test to ensure the security fix stays in place.
+        If someone accidentally reintroduces shell commands, this test
+        documents the expected behavior.
+        """
+        # Create a simple FASTQ file
+        fastq_file = tmp_path / "reads.fastq.gz"
+        content = "@read1\nATCG\n+\nIIII\n"
+        with gzip.open(fastq_file, 'wt') as f:
+            f.write(content)
+
+        # Create read config
+        read_config = ReadConfig(
+            filename="reads.fastq.gz",
+            filepath=fastq_file,
+            ngs_type='illumina',
+            coding_type=CodingType.GZIP,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=tmp_path
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        validator = ReadValidator(read_config, output_dir)
+
+        # Read the source code of _count_lines_fast method
+        import inspect
+        source = inspect.getsource(validator._count_lines_fast)
+
+        # Verify no subprocess imports or calls are present (check actual code, not docs)
+        # We exclude docstrings by checking for the patterns in context
+        assert 'subprocess.run' not in source, \
+            "_count_lines_fast should not use subprocess.run (security vulnerability)"
+        assert 'subprocess.Popen' not in source, \
+            "_count_lines_fast should not use subprocess.Popen (security vulnerability)"
+        assert 'import subprocess' not in source, \
+            "_count_lines_fast should not import subprocess"
+        assert "shell=True" not in source, \
+            "_count_lines_fast should not use shell=True"
+
+        # Verify no shell command patterns are present
+        assert "['sh', '-c'" not in source and '["sh", "-c"' not in source, \
+            "_count_lines_fast should not use shell commands"
+        assert '| wc -l' not in source, \
+            "_count_lines_fast should not use shell pipes"
+
+        # Verify it uses Python libraries instead
+        assert 'open_file_with_coding_type' in source, \
+            "_count_lines_fast should use open_file_with_coding_type"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -22,12 +22,12 @@ Classes:
 """
 
 from pathlib import Path
-from typing import Optional, Dict, List, IO
+from typing import Optional, Dict, List, IO, Union
 from dataclasses import dataclass
 import shutil
 
 from validation_pkg.logger import get_logger
-from validation_pkg.utils.settings import BaseSettings
+from validation_pkg.utils.settings import BaseSettings, UNSET, _UnsetType
 from validation_pkg.exceptions import (
     FeatureValidationError,
     FileFormatError,
@@ -125,10 +125,6 @@ class FeatureValidator:
         Settings for feature validation and processing.
 
         Attributes:
-            validation_level: Validation thoroughness level:
-                - 'strict': Full parsing and validation of all features (default)
-                - 'trust': Fast validation - check basic format and first few features
-                - 'minimal': Only verify file exists and has correct extension
             sort_by_position: Sort features by position (default: True)
             check_coordinates: Validate that start < end (default: True)
             allow_zero_length: Allow zero-length features (start == end) (default: False)
@@ -139,20 +135,7 @@ class FeatureValidator:
             coding_type: Output compression type: 'gz', 'bz2', or None (default: None)
             output_filename_suffix: Suffix to add to output filename (default: None)
             output_subdir_name: Subdirectory name for output files (default: None)
-
-        Validation Level Behavior:
-            - validation_level='strict': Parse all features, validate all, apply edits to all
-            - validation_level='trust': Parse all features, validate first 10 only, apply edits to all
-            - validation_level='minimal': Skip parsing, copy file as-is
-
-        Example:
-            >>> settings = FeatureValidator.Settings()
-            >>> settings = settings.update(sort_by_position=True, coding_type='gz', replace_id_with='chr1')
-            >>> validator = FeatureValidator(feature_config, output_dir, settings)
         """
-        # Validation level
-        validation_level: str = 'strict'  # 'strict', 'trust', or 'minimal'
-
         # Validation options
         sort_by_position: bool = True
         check_coordinates: bool = True
@@ -165,126 +148,41 @@ class FeatureValidator:
         output_filename_suffix: Optional[str] = None
         output_subdir_name: Optional[str] = None
 
-        # Unified threads parameter (None = auto-detect)
-        # If specified, automatically splits between max_workers and compression_threads
-        threads: Optional[int] = None
 
-        # Compression threads (None = auto-detect)
-        # Explicit setting overrides thread splitting from 'threads'
-        compression_threads: Optional[int] = None
-
-        # Parallel processing (None = no parallelization, int = max workers)
-        # Explicit setting overrides thread splitting from 'threads'
-        max_workers: Optional[int] = None
-
-
-    def __init__(self, feature_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
+    def __init__(self, feature_config, settings: Optional[Settings] = None) -> None:
         """
         Initialize feature validator.
 
         Args:
             feature_config: FeatureConfig object from ConfigManager with file info
-            output_dir: Directory for output files (Path object)
             settings: Settings object with validation parameters.
-                If None, uses settings from feature_config.settings_dict (if available),
-                otherwise uses defaults. If provided, merges with config settings
-                (user settings take precedence).
-
-        Settings precedence (highest to lowest):
-            1. Explicit user settings parameter
-            2. Config file settings (feature_config.settings_dict)
-            3. Default Settings values
-
-        Example:
-            >>> # Example 1: Use config settings (if available)
-            >>> config = ConfigManager.load("config.json")
-            >>> validator = FeatureValidator(config.ref_feature, output_dir)
-            >>> # Uses validation_level, threads, etc. from config.json
-            >>>
-            >>> # Example 2: Override specific settings
-            >>> settings = FeatureValidator.Settings()
-            >>> settings = settings.update(sort_by_position=True)
-            >>> validator = FeatureValidator(config.ref_feature, output_dir, settings)
-            >>> # Uses sort_by_position=True (user) + other settings from config
+                If None, uses options from feature_config.options (threads, validation_level),
+                otherwise uses defaults. If provided, only non-UNSET user values override
+                config/defaults (smart merge).
         """
         self.logger = get_logger()
+       
+        # From genome global configuration
         self.feature_config = feature_config
-        self.output_dir = Path(output_dir)
-
-        # Apply 4-layer settings precedence:
-        # Layer 1: Defaults (lowest priority)
-        # Layer 2: Global options (validation_level, threads only)
-        # Layer 3: File-level config settings (all fields)
-        # Layer 4: User settings (highest priority)
-
-        # Layer 1: Start with defaults
-        merged_dict = self.Settings().to_dict()
-
-        # Layer 2: Apply global options (only validation_level and threads)
-        if feature_config.global_options:
-            for key, value in feature_config.global_options.items():
-                if key in merged_dict:
-                    merged_dict[key] = value
-                    self.logger.debug(f"Applied global option: {key}={value}")
-
-        # Layer 3: Apply file-level config settings (override global, all fields allowed)
-        if feature_config.settings_dict:
-            for key, value in feature_config.settings_dict.items():
-                # Warn if file-level overrides global option
-                if key in feature_config.global_options:
-                    old_value = feature_config.global_options[key]
-                    self.logger.warning(
-                        f"File-level setting '{key}={value}' overrides global option '{key}={old_value}' "
-                        f"for {feature_config.filename}"
-                    )
-                merged_dict[key] = value
-                self.logger.debug(f"Applied file-level setting: {key}={value}")
-
-        # Layer 4: Apply user settings (override everything)
-        if settings is not None:
-            user_dict = settings.to_dict()
-
-            # Log warnings for overrides
-            overridden = []
-            for key, new_value in user_dict.items():
-                old_value = merged_dict.get(key)
-                if old_value != new_value:
-                    # Determine source of overridden value
-                    if key in feature_config.settings_dict:
-                        source = "file-level setting"
-                    elif key in feature_config.global_options:
-                        source = "global option"
-                    else:
-                        source = "default"
-                    overridden.append(f"{key}: {old_value} ({source}) → {new_value} (user)")
-                merged_dict[key] = new_value
-
-            if overridden:
-                self.logger.warning(
-                    f"User-provided settings override config settings: {'; '.join(overridden)}"
-                )
-
-        # Create final settings object
-        self.settings = self.Settings.from_dict(merged_dict)
-
-        # Validate validation_level setting
-        valid_levels = {'strict', 'trust', 'minimal'}
-        if self.settings.validation_level not in valid_levels:
-            raise ValueError(
-                f"Invalid validation_level '{self.settings.validation_level}'. "
-                f"Must be one of: {', '.join(valid_levels)}"
-            )
-
-        # Log settings being used
-        self.logger.debug(f"Initializing FeatureValidator with settings:\n{self.settings}")
-
-        # Resolved paths
+        self.output_dir = feature_config.output_dir
+        self.validation_level = feature_config.global_options.get("validation_level")   
+        self.threads = feature_config.global_options.get("threads") 
         self.input_path = feature_config.filepath
+
+        # From settings
+        self.settings = settings if not None else self.Settings() 
 
         # Parsed data
         self.features: List[Feature] = []
 
-    def validate(self) -> None:
+    def __post_init__(self):
+        if not self.validation_level:
+            self.validation_level = 'strict'    #   default global value
+
+        if not self.threads:
+            self.threads = 1    #   default global value
+
+    def run(self) -> None:
         """
         Main validation and processing workflow.
 
@@ -354,10 +252,10 @@ class FeatureValidator:
         - 'minimal': Skip parsing entirely
         """
         format_str = str(self.feature_config.detected_format)
-        self.logger.debug(f"Parsing {format_str} file (validation_level={self.settings.validation_level})...")
+        self.logger.debug(f"Parsing {format_str} file (validation_level={self.validation_level})...")
 
         # Minimal mode - skip parsing
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.info("Minimal validation mode - skipping file parsing")
             self.features = []
             return
@@ -382,7 +280,7 @@ class FeatureValidator:
                 )
                 # Empty feature files are allowed, just warn
 
-            if self.settings.validation_level == 'trust':
+            if self.validation_level == 'trust':
                 self.logger.info(f"Trust mode - parsed {len(self.features)} feature(s), will validate first 10 only")
             else:
                 self.logger.debug(f"Parsed {len(self.features)} feature(s)")
@@ -549,16 +447,18 @@ class FeatureValidator:
         - 'strict': Validate all features
         - 'trust': Validate only first 10 features
         - 'minimal': Skip validation (no parsing done)
+
+        Note: Coordinate validation is trivial math - parallelization overhead exceeds gains.
         """
         self.logger.debug("Validating features...")
 
         # Minimal mode - no features to validate
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - skipping feature validation")
             return
 
         # Determine how many features to validate
-        if self.settings.validation_level == 'trust':
+        if self.validation_level == 'trust':
             # Trust mode - validate only first 10 features
             features_to_validate = min(10, len(self.features))
             self.logger.debug(f"Trust mode - validating first {features_to_validate} of {len(self.features)} features")
@@ -703,11 +603,13 @@ class FeatureValidator:
         - 'strict': Apply all edits to all features
         - 'trust': Apply all edits to parsed features (first 10)
         - 'minimal': Skip edits (file will be copied as-is)
+
+        Note: Consider parallelizing ID replacement if profiling shows it's a bottleneck for large GFF files (>100K features).
         """
         self.logger.debug("Applying editing specifications from settings...")
 
         # Minimal mode - skip edits, file will be copied as-is
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - skipping edits")
             return
 
@@ -821,7 +723,7 @@ class FeatureValidator:
 
         # Minimal mode - copy file as-is without parsing
         # Required: GFF format + coding must match settings.coding_type
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - validating format and coding requirements")
 
             # Check format - must be GFF (reject BED files)
@@ -885,7 +787,7 @@ class FeatureValidator:
             coding_enum = CT.BZIP2
 
         # Use optimized compression writer
-        with open_compressed_writer(output_path, coding_enum, threads=self.settings.compression_threads) as handle:
+        with open_compressed_writer(output_path, coding_enum, threads=self.threads) as handle:
             # Write GFF header
             handle.write("##gff-version 3\n")
 

@@ -3,13 +3,19 @@
 Example 7: Direct Validator Instantiation
 
 This example demonstrates how to create validators directly without
-using the config file or functional API. This gives you maximum control
-over the validation process.
+using the functional API. This gives you maximum control over the
+validation process.
 
 This is useful when:
 - You need to build configs programmatically
 - You want to integrate with existing pipelines
 - You need to validate files not specified in a config file
+- You want fine-grained control over validator instantiation
+
+Key Concepts:
+1. Config Settings: Validators automatically apply settings from config.json
+2. User Settings: When you pass a Settings object, it REPLACES config settings
+3. Best Practice: Don't pass settings=... if you want to use config settings
 """
 
 import sys
@@ -157,6 +163,41 @@ def main():
 
     print()
     print("=" * 70)
+    print("5. Using Config Settings from config.json (NEW)")
+    print("=" * 70)
+
+    # Load a config file
+    from validation_pkg.config_manager import ConfigManager
+    config_file = Path(__file__).parent / "data" / "config.json"
+
+    if config_file.exists():
+        config = ConfigManager.load(str(config_file))
+
+        # Example 5a: Use config settings automatically (RECOMMENDED)
+        print("\nExample 5a: Config settings applied automatically:")
+        print("-" * 70)
+        if config.ref_genome:
+            # Don't pass settings parameter - config settings will be used!
+            validator = GenomeValidator(config.ref_genome, output_dir)
+            print(f"  Settings applied from config:")
+            print(f"    - validation_level: {validator.settings.validation_level}")
+            print(f"    - threads: {validator.settings.threads}")
+            print("  Validator will use all settings from config.json")
+
+        # Example 5b: User settings REPLACE config settings (be careful!)
+        print("\nExample 5b: User settings replace config settings:")
+        print("-" * 70)
+        if config.ref_genome:
+            # When you pass settings, config settings are IGNORED
+            user_settings = GenomeValidator.Settings(coding_type='bz2')
+            validator = GenomeValidator(config.ref_genome, output_dir, user_settings)
+            print(f"  User settings override config:")
+            print(f"    - coding_type: {validator.settings.coding_type} (from user)")
+            print(f"    - validation_level: {validator.settings.validation_level} (default, NOT from config)")
+            print("  Config settings are NOT merged - user settings replace them entirely")
+
+    print()
+    print("=" * 70)
     print("Key Points:")
     print("=" * 70)
     print("1. You need to create Config objects manually (GenomeConfig, etc.)")
@@ -164,6 +205,12 @@ def main():
     print("3. CodingType: NONE, GZIP, or BZIP2")
     print("4. Format detection must be done manually or use ConfigManager")
     print("5. After creating the validator, call validate() to run")
+    print()
+    print("NEW: Config Settings Support")
+    print("-" * 70)
+    print("• Validators automatically apply settings from config.json")
+    print("• Don't pass settings=... to use config settings")
+    print("• Passing Settings object REPLACES config settings (no merge)")
     print()
     print(f"Output directory: {output_dir}")
 

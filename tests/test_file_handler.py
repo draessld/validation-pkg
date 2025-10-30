@@ -418,7 +418,7 @@ class TestCompressionConversion:
         nonexistent = temp_dir / "nonexistent.fasta.gz"
         output_file = temp_dir / "output.fasta.bz2"
 
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(CompressionError):
             gz_to_bz2(nonexistent, output_file)
 
     def test_conversion_preserves_content(self, temp_dir, sample_content):
@@ -728,3 +728,121 @@ class TestThreadsConfiguration:
         assert output_file.exists()
         with gzip.open(output_file, 'rt') as f:
             assert f.read() == sample_content
+
+
+class TestSecurityCommandInjectionFileHandler:
+    """
+    Security tests for command injection protection in file_handler.
+
+    These tests verify that compression conversion functions use subprocess
+    with list arguments (not shell=True), preventing command injection attacks
+    through malicious filenames.
+    """
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for testing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def sample_content(self):
+        """Provide sample FASTA content for testing."""
+        return ">test_sequence\nATCGATCGATCG\n"
+
+    def test_no_shell_true_in_compression_functions(self, temp_dir, sample_content):
+        """
+        Verify that compression conversion functions don't use shell=True.
+
+        This is a regression test to ensure the security fix stays in place.
+        If someone accidentally reintroduces shell commands, this test
+        documents the expected behavior.
+        """
+        import inspect
+        from validation_pkg.utils import file_handler
+
+        # List of functions to check
+        functions_to_check = [
+            'gz_to_bz2',
+            'bz2_to_gz',
+            'none_to_gz',
+            'gz_to_none',
+            'bz2_to_none',
+            'none_to_bz2'
+        ]
+
+        for func_name in functions_to_check:
+            func = getattr(file_handler, func_name)
+            source = inspect.getsource(func)
+
+            # Verify no dangerous shell command patterns (actual code, not docs)
+            # These patterns indicate actual vulnerable code
+            assert "subprocess.run(cmd, shell=True" not in source, \
+                f"{func_name} should not use subprocess.run with shell=True (security vulnerability)"
+            assert 'executable=\'/bin/bash\'' not in source and 'executable="/bin/bash"' not in source, \
+                f"{func_name} should not use bash as executable (security vulnerability)"
+
+            # Verify no string interpolation into shell commands
+            assert "f\"set -o pipefail" not in source, \
+                f"{func_name} should not use shell pipes with f-strings"
+            assert 'cmd = f"' not in source, \
+                f"{func_name} should not build shell commands with f-strings"
+
+            # Verify uses subprocess.Popen or subprocess.run with list args
+            assert ('subprocess.Popen' in source or 'subprocess.run' in source), \
+                f"{func_name} should use subprocess.Popen or subprocess.run"
+
+            # Verify uses list concatenation for args (secure pattern)
+            assert ('[decompress_cmd]' in source or '[compress_cmd]' in source or
+                    'stdin=' in source or 'stdout=' in source), \
+                f"{func_name} should use list arguments for subprocess"
+
+    def test_gz_to_bz2_secure_processing(self, temp_dir, sample_content):
+        """Test gz_to_bz2 processes files securely."""
+        # Create input file
+        input_file = temp_dir / "input.fasta.gz"
+        with gzip.open(input_file, 'wt') as f:
+            f.write(sample_content)
+
+        output_file = temp_dir / "output.fasta.bz2"
+
+        # Should complete successfully without executing shell commands
+        gz_to_bz2(input_file, output_file)
+
+        # Verify output is correct
+        assert output_file.exists()
+        with bz2.open(output_file, 'rt') as f:
+            assert f.read() == sample_content
+
+    def test_none_to_gz_secure_processing(self, temp_dir, sample_content):
+        """Test none_to_gz processes files securely."""
+        # Create input file
+        input_file = temp_dir / "input.fasta"
+        input_file.write_text(sample_content)
+
+        output_file = temp_dir / "output.fasta.gz"
+
+        # Should complete successfully without executing shell commands
+        none_to_gz(input_file, output_file)
+
+        # Verify output is correct
+        assert output_file.exists()
+        with gzip.open(output_file, 'rt') as f:
+            assert f.read() == sample_content
+
+    def test_error_handling_without_shell_exposure(self, temp_dir):
+        """Test that error messages don't expose shell command vulnerabilities."""
+        # Try to convert non-existent file
+        nonexistent = temp_dir / "nonexistent.gz"
+        output_file = temp_dir / "output.bz2"
+
+        try:
+            gz_to_bz2(nonexistent, output_file)
+            assert False, "Should have raised CompressionError"
+        except CompressionError as e:
+            error_msg = str(e)
+            # Error message should mention the problem, not shell syntax
+            assert "Decompression failed" in error_msg or "Compression conversion failed" in error_msg
+            # Should not contain shell syntax
+            assert "sh -c" not in error_msg
+            assert "set -o pipefail" not in error_msg

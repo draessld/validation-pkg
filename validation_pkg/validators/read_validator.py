@@ -20,15 +20,17 @@ Classes:
 """
 
 from pathlib import Path
-from typing import Optional, List, IO
+from typing import Optional, List, IO, Union
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import shutil
+from multiprocessing import Pool
+from functools import partial
 
 from validation_pkg.logger import get_logger
-from validation_pkg.utils.settings import BaseSettings
+from validation_pkg.utils.settings import BaseSettings, UNSET, _UnsetType
 from validation_pkg.exceptions import (
     ReadValidationError,
     FileFormatError,
@@ -47,6 +49,49 @@ from validation_pkg.utils.file_handler import (
     none_to_bz2,
     open_compressed_writer
 )
+
+
+# Standalone function for parallel processing (must be picklable - defined at module level)
+def _validate_single_read(record, check_invalid_chars: bool, allow_empty_id: bool):
+    """
+    Validate a single read record (parallelizable).
+
+    This function is standalone (not a method) to be picklable for multiprocessing.
+
+    Args:
+        record: BioPython SeqRecord object
+        check_invalid_chars: If True, check for non-ATCGN characters
+        allow_empty_id: If True, allow empty sequence IDs
+
+    Returns:
+        dict: {'success': True} if valid, or {'error': str, 'record_id': str, 'details': dict} if invalid
+    """
+    # Check empty ID
+    if not record.id and not allow_empty_id:
+        return {
+            'error': f"Sequence has no ID",
+            'record_id': None,
+            'details': {'sequence_index': None}  # Index will be added by caller
+        }
+
+    # Check invalid characters
+    if check_invalid_chars:
+        valid_chars = set('ATCGNatcgn')
+        seq_str = str(record.seq)
+        invalid_chars = set(seq_str) - valid_chars
+
+        if invalid_chars:
+            char_count = sum(1 for c in seq_str if c in invalid_chars)
+            return {
+                'error': f"Contains {char_count} invalid character(s): {', '.join(sorted(invalid_chars))}",
+                'record_id': record.id,
+                'details': {
+                    'invalid_chars': list(invalid_chars),
+                    'count': char_count
+                }
+            }
+
+    return {'success': True, 'record_id': record.id}
 
 class ReadValidator:
     """
@@ -89,10 +134,6 @@ class ReadValidator:
         Settings for read validation and processing.
 
         Attributes:
-            validation_level: Validation thoroughness level:
-                - 'strict': Full decompression, parsing, and validation of all sequences (default)
-                - 'trust': Fast validation - check line count and first record only
-                - 'minimal': Only verify file exists and has correct extension
             check_invalid_chars: If True, validates that sequences contain only valid nucleotides (ATCGN)
             allow_empty_id: If True, allows sequences without IDs
             allow_duplicate_ids: If True, allows duplicate sequence IDs across the file
@@ -106,21 +147,7 @@ class ReadValidator:
             When outdir_by_ngs_type=True, output_subdir_name will be automatically set to the
             read's ngs_type (illumina/ont/pacbio), overriding any manually set value.
 
-        Trust Mode Behavior:
-            - validation_level='strict': Full validation (current behavior)
-            - validation_level='trust': FASTQ - check line count % 4 == 0 and first record format
-                                        BAM - verify header and first record only
-            - validation_level='minimal': Only file existence and extension check
-
-        Example:
-            >>> settings = ReadValidator.Settings()
-            >>> print(settings)  # View all settings
-            >>> ref_settings = settings.update(sequence_prefix="chr1", output_filename_suffix="ref")
-            >>> validator = ReadValidator(read_config, output_dir, ref_settings)
         """
-        # Validation level
-        validation_level: str = 'strict'  # 'strict', 'trust', or 'minimal'
-
         # Validation options
         check_invalid_chars: bool = False 
         allow_empty_id: bool = False
@@ -136,141 +163,55 @@ class ReadValidator:
         output_subdir_name: Optional[str] = None
         outdir_by_ngs_type: bool = False
 
-        # Unified threads parameter (None = auto-detect)
-        # If specified, automatically splits between max_workers and compression_threads
-        threads: Optional[int] = None
-
-        # Compression threads (None = auto-detect)
-        # Explicit setting overrides thread splitting from 'threads'
-        compression_threads: Optional[int] = None
-
-        # Parallel processing (None = no parallelization, int = max workers)
-        # Explicit setting overrides thread splitting from 'threads'
-        max_workers: Optional[int] = None
-
-    def __init__(self, read_config, output_dir: Path, settings: Optional[Settings] = None) -> None:
+    def __init__(self, read_config, settings: Optional[Settings] = None) -> None:
         """
         Initialize read validator.
 
         Args:
             read_config: ReadConfig object from ConfigManager with file info
-            output_dir: Directory for output files (Path object)
             settings: Settings object with validation parameters.
-                If None, uses settings from read_config.settings_dict (if available),
-                otherwise uses defaults. If provided, merges with config settings
-                (user settings take precedence).
-
-        Note: In future versions, output_dir may be moved to settings.
-
-        Settings precedence (highest to lowest):
-            1. Explicit user settings parameter
-            2. Config file settings (read_config.settings_dict)
-            3. Default Settings values
-
-        Example:
-            >>> # Example 1: Use config settings (if available)
-            >>> config = ConfigManager.load("config.json")
-            >>> validator = ReadValidator(config.reads[0], output_dir)
-            >>> # Uses validation_level, threads, etc. from config.json
-            >>>
-            >>> # Example 2: Override specific settings
-            >>> settings = ReadValidator.Settings()
-            >>> settings = settings.update(sequence_prefix="chr1")
-            >>> validator = ReadValidator(config.reads[0], output_dir, settings)
-            >>> # Uses sequence_prefix='chr1' (user) + other settings from config
+                If None, uses options from read_config.options (threads, validation_level),
+                otherwise uses defaults. If provided, only non-UNSET user values override
+                config/defaults (smart merge).
         """
         self.logger = get_logger()
+
+        # From genome global configuration
         self.read_config = read_config
-        self.output_dir = Path(output_dir)
+        self.output_dir = read_config.output_dir
+        self.validation_level = read_config.global_options.get("validation_level")   
+        self.threads = read_config.global_options.get("threads") 
+        self.input_path = read_config.filepath
 
-        # Apply 4-layer settings precedence:
-        # Layer 1: Defaults (lowest priority)
-        # Layer 2: Global options (validation_level, threads only)
-        # Layer 3: File-level config settings (all fields)
-        # Layer 4: User settings (highest priority)
+        # From settings
+        self.settings = settings if not None else self.Settings() 
 
-        # Layer 1: Start with defaults
-        merged_dict = self.Settings().to_dict()
+        # Parsed data
+        self.sequences = []  # List of SeqRecord objects
 
-        # Layer 2: Apply global options (only validation_level and threads)
-        if read_config.global_options:
-            for key, value in read_config.global_options.items():
-                if key in merged_dict:
-                    merged_dict[key] = value
-                    self.logger.debug(f"Applied global option: {key}={value}")
+    def __post_init__(self):
+        if not self.validation_level:
+            self.validation_level = 'strict'    #   default global value
 
-        # Layer 3: Apply file-level config settings (override global, all fields allowed)
-        if read_config.settings_dict:
-            for key, value in read_config.settings_dict.items():
-                # Warn if file-level overrides global option
-                if key in read_config.global_options:
-                    old_value = read_config.global_options[key]
-                    self.logger.warning(
-                        f"File-level setting '{key}={value}' overrides global option '{key}={old_value}' "
-                        f"for {read_config.filename}"
-                    )
-                merged_dict[key] = value
-                self.logger.debug(f"Applied file-level setting: {key}={value}")
-
-        # Layer 4: Apply user settings (override everything)
-        if settings is not None:
-            user_dict = settings.to_dict()
-
-            # Log warnings for overrides
-            overridden = []
-            for key, new_value in user_dict.items():
-                old_value = merged_dict.get(key)
-                if old_value != new_value:
-                    # Determine source of overridden value
-                    if key in read_config.settings_dict:
-                        source = "file-level setting"
-                    elif key in read_config.global_options:
-                        source = "global option"
-                    else:
-                        source = "default"
-                    overridden.append(f"{key}: {old_value} ({source}) → {new_value} (user)")
-                merged_dict[key] = new_value
-
-            if overridden:
-                self.logger.warning(
-                    f"User-provided settings override config settings: {'; '.join(overridden)}"
-                )
-
-        # Create final settings object
-        self.settings = self.Settings.from_dict(merged_dict)
-
-        # Validate validation_level setting
-        valid_levels = {'strict', 'trust', 'minimal'}
-        if self.settings.validation_level not in valid_levels:
-            raise ValueError(
-                f"Invalid validation_level '{self.settings.validation_level}'. "
-                f"Must be one of: {', '.join(valid_levels)}"
-            )
+        if not self.threads:
+            self.threads = 1    #   default global value
 
         # Apply outdir_by_ngs_type if enabled
         if self.settings.outdir_by_ngs_type:
             # Override output_subdir_name with ngs_type
-            self.settings = self.settings.update(output_subdir_name=read_config.ngs_type)
-            self.logger.debug(f"Applied outdir_by_ngs_type: output_subdir_name set to '{read_config.ngs_type}'")
+            self.settings = self.settings.update(output_subdir_name=self.read_config.ngs_type)
+            self.logger.debug(f"Applied outdir_by_ngs_type: output_subdir_name set to '{self.read_config.ngs_type}'")
 
-        # Log settings being used
-        self.logger.debug(f"Initializing ReadValidator with settings:\n{self.settings}")
 
-        # Resolved paths
-        self.input_path = read_config.filepath
-
-        # Parsed data
-        self.sequences = []  # List of SeqRecord objects
-    
-    def validate(self) -> None:
+    def run(self) -> None:
         """
         Main validation and processing workflow.
 
         Uses read_config data (format, compression) provided by ConfigManager.
 
         Workflow differs based on input format:
-        - FASTQ: Parse → Validate → Edit → Statistics → Save
-        - BAM: Copy original → Convert to FASTQ → Parse → Validate → Edit → Statistics → Save
+        - FASTQ: Parse → Validate → Edit → Save
+        - BAM: Copy original → Convert to FASTQ → Parse → Validate → Edit → Save
 
         Raises:
             ReadValidationError: If validation fails
@@ -480,10 +421,10 @@ class ReadValidator:
         Note: BAM files are handled separately in the validate() method.
         This method only processes FASTQ files.
         """
-        self.logger.debug(f"Parsing {self.read_config.detected_format} file (validation_level={self.settings.validation_level})...")
+        self.logger.debug(f"Parsing {self.read_config.detected_format} file (validation_level={self.validation_level})...")
 
         # Minimal mode - skip all parsing and validation except CodingType
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.info("Minimal validation mode - skipping file parsing")
             # Set empty sequences list - file will be copied as-is in _save_output
             self.sequences = []
@@ -491,7 +432,7 @@ class ReadValidator:
 
         # Trust mode: Parse only first 10 sequences for validation
         # Strict mode: Parse all sequences
-        if self.settings.validation_level == 'trust':
+        if self.validation_level == 'trust':
             self.logger.info("Trust mode - parsing first 10 sequences only for validation")
             parse_limit = 10
         else:
@@ -500,7 +441,7 @@ class ReadValidator:
 
         try:
             # Get total line count for progress reporting (strict mode only)
-            if self.settings.validation_level == 'strict':
+            if self.validation_level == 'strict':
                 try:
                     line_count = self._count_lines_fast()
                     estimated_sequences = line_count // 4  # FASTQ has 4 lines per sequence
@@ -581,58 +522,130 @@ class ReadValidator:
     
     def _validate_sequences(self) -> None:
         """
-        Validate parsed sequences.
+        Validate parsed sequences with optional parallelization.
 
         Behavior depends on validation_level:
-        - 'strict': Validate all sequences
-        - 'trust': Validate only first 10 sequences
+        - 'strict': Validate all sequences (optionally in parallel if threads > 1)
+        - 'trust': Validate only first 10 sequences (sequential)
         - 'minimal': Skip (no sequences parsed)
+
+        Parallelization:
+        - Only enabled in strict mode when self.threads > 1
+        - Uses multiprocessing.Pool for true parallelism (bypasses GIL)
+        - Chunk-based processing to amortize overhead
+        - All validation errors are collected before raising
         """
         # Determine how many sequences to validate
-        if self.settings.validation_level == 'trust':
+        if self.validation_level == 'trust':
             validate_count = min(10, len(self.sequences))
-            self.logger.info(f"Trust mode - validating first {validate_count} of {len(self.sequences):,} sequences")
+            self.logger.info(f"Trust mode - validating first {validate_count} of {len(self.sequences):,} sequences (sequential)")
+            use_parallel = False
         else:
             validate_count = len(self.sequences)
-            self.logger.debug(f"Validating {validate_count:,} sequences...")
+            use_parallel = (self.threads and self.threads > 1)
 
-        # Validate sequences
-        for idx in range(validate_count):
-            record = self.sequences[idx]
-            # Check sequence ID
-            if not record.id and not self.settings.allow_empty_id:
-                error_msg = f"Sequence at index {idx} has no ID"
-                self.logger.add_validation_issue(
-                    level='ERROR',
-                    category='read',
-                    message=error_msg,
-                    details={'sequence_index': idx, 'sequence_id': str(record.id)}
+            if use_parallel:
+                self.logger.info(
+                    f"Parallel validation enabled: {validate_count:,} sequences across {self.threads} workers",
+                    parallel_mode=True,
+                    workers=self.threads,
+                    total_sequences=validate_count
                 )
-                raise ReadValidationError(error_msg)
-            
-            
-            # Check for valid nucleotides
-            if self.settings.check_invalid_chars:
-                valid_chars = set('ATCGNatcgn')
-                seq_str = str(record.seq)
-                invalid_chars = set(seq_str) - valid_chars
+            else:
+                self.logger.info(f"Sequential validation: {validate_count:,} sequences (threads=1)")
 
-                if invalid_chars:
-                    char_count = sum(1 for c in seq_str if c in invalid_chars)
-                    error_msg = f"Sequence '{record.id}' contains {char_count} invalid character(s): {', '.join(sorted(invalid_chars))}"
+        # Parallel validation (strict mode with threads > 1)
+        if use_parallel:
+            # Determine chunk size: min 1000 records per chunk, or split into 4 chunks per worker
+            chunk_size = max(1000, validate_count // (self.threads * 4))
+
+            self.logger.debug(
+                f"Parallel processing configuration: {self.threads} workers, chunk_size={chunk_size:,}",
+                workers=self.threads,
+                chunk_size=chunk_size,
+                estimated_chunks=validate_count // chunk_size
+            )
+
+            # Create partial function with settings
+            validator_func = partial(
+                _validate_single_read,
+                check_invalid_chars=self.settings.check_invalid_chars,
+                allow_empty_id=self.settings.allow_empty_id
+            )
+
+            # Validate in parallel
+            self.logger.debug(f"Starting parallel validation across {self.threads} worker processes...")
+            with Pool(processes=self.threads) as pool:
+                results = pool.map(validator_func, self.sequences[:validate_count], chunksize=chunk_size)
+
+            self.logger.debug(
+                f"Parallel validation completed: {validate_count:,} sequences processed",
+                sequences_validated=validate_count
+            )
+
+            # Collect errors
+            errors = []
+            for idx, result in enumerate(results):
+                if 'error' in result:
+                    # Add index to details if missing
+                    if result['details'].get('sequence_index') is None:
+                        result['details']['sequence_index'] = idx
+
+                    # Log validation issue
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='read',
+                        message=f"Sequence '{result['record_id']}': {result['error']}",
+                        details=result['details']
+                    )
+                    errors.append(result)
+
+            # Raise if any errors found
+            if errors:
+                error_msg = f"{len(errors)} validation error(s) found in sequences (parallel validation)"
+                self.logger.error(error_msg, error_count=len(errors), total_sequences=validate_count)
+                raise ReadValidationError(error_msg)
+            else:
+                self.logger.info(f"✓ All {validate_count:,} sequences validated successfully (parallel mode)")
+
+        # Sequential validation (trust mode or single-threaded)
+        else:
+            for idx in range(validate_count):
+                record = self.sequences[idx]
+
+                # Check sequence ID
+                if not record.id and not self.settings.allow_empty_id:
+                    error_msg = f"Sequence at index {idx} has no ID"
                     self.logger.add_validation_issue(
                         level='ERROR',
                         category='read',
                         message=error_msg,
-                        details={
-                            'sequence_id': record.id,
-                            'invalid_chars': list(invalid_chars),
-                            'count': char_count
-                        }
+                        details={'sequence_index': idx, 'sequence_id': str(record.id)}
                     )
                     raise ReadValidationError(error_msg)
 
-        # 3. Check for duplicate IDs
+                # Check for valid nucleotides
+                if self.settings.check_invalid_chars:
+                    valid_chars = set('ATCGNatcgn')
+                    seq_str = str(record.seq)
+                    invalid_chars = set(seq_str) - valid_chars
+
+                    if invalid_chars:
+                        char_count = sum(1 for c in seq_str if c in invalid_chars)
+                        error_msg = f"Sequence '{record.id}' contains {char_count} invalid character(s): {', '.join(sorted(invalid_chars))}"
+                        self.logger.add_validation_issue(
+                            level='ERROR',
+                            category='read',
+                            message=error_msg,
+                            details={
+                                'sequence_id': record.id,
+                                'invalid_chars': list(invalid_chars),
+                                'count': char_count
+                            }
+                        )
+                        raise ReadValidationError(error_msg)
+
+        # Check for duplicate IDs (always sequential - requires full list)
         if not self.settings.allow_duplicate_ids:
             seq_ids = [record.id for record in self.sequences]
             if len(seq_ids) != len(set(seq_ids)):
@@ -645,8 +658,10 @@ class ReadValidator:
                     details={'duplicate_ids': duplicates}
                 )
                 raise ReadValidationError(error_msg)
-        
-        self.logger.debug("✓ Sequence validation passed")
+
+        # Final success message (if not already logged in parallel mode)
+        if not use_parallel:
+            self.logger.debug("✓ Sequence validation passed")
     
     def _apply_edits(self) -> None:
         """
@@ -657,6 +672,8 @@ class ReadValidator:
         - Quality filtering
         - Adapter trimming
         - Read ID prefix/suffix modification
+
+        Note: Parallelization should be added here when edits are implemented.
         """
         self.logger.debug("Applying editing specifications from settings...")
 
@@ -688,13 +705,13 @@ class ReadValidator:
         import subprocess
 
         # Minimal mode - skip conversion
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.info("Minimal validation mode - skipping BAM conversion")
             self.sequences = []
             return
 
         # Trust mode - validate header and first few reads only
-        if self.settings.validation_level == 'trust':
+        if self.validation_level == 'trust':
             self.logger.info("Trust mode - validating BAM header and first records only")
             try:
                 import pysam  # type: ignore
@@ -957,7 +974,7 @@ class ReadValidator:
 
         # Minimal mode - copy file as-is without parsing
         # Required: FASTQ format + coding must match settings.coding_type
-        if self.settings.validation_level == 'minimal':
+        if self.validation_level == 'minimal':
             self.logger.debug("Minimal mode - validating format and coding requirements")
 
             # Check format - must be FASTQ
@@ -1024,7 +1041,7 @@ class ReadValidator:
 
         # Trust mode - copy original file with coding conversion
         # Trust mode parsed only first 10 sequences for validation, so we copy the original file
-        if self.settings.validation_level == 'trust':
+        if self.validation_level == 'trust':
             self.logger.debug("Trust mode - copying original file with coding conversion")
 
             # Both are CodingType enum: read_config.coding_type and coding (normalized above)
@@ -1051,7 +1068,7 @@ class ReadValidator:
 
                 conversion_func = conversion_map.get((input_coding, output_coding))
                 if conversion_func:
-                    conversion_func(self.input_path, output_path, threads=self.settings.compression_threads)
+                    conversion_func(self.input_path, output_path, threads=self.threads)
                 else:
                     error_msg = f"Unsupported coding conversion: {input_coding} -> {output_coding}"
                     raise ReadValidationError(error_msg)
@@ -1064,7 +1081,7 @@ class ReadValidator:
         self.logger.debug(f"Writing output to: {output_path}")
 
         # Use optimized compression writer
-        with open_compressed_writer(output_path, coding, threads=self.settings.compression_threads) as handle:
+        with open_compressed_writer(output_path, coding, threads=self.threads) as handle:
             SeqIO.write(self.sequences, handle, 'fastq')
 
         self.logger.info(f"Output saved: {output_path}")

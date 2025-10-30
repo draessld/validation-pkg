@@ -31,6 +31,11 @@ from validation_pkg.exceptions import (
     FileNotFoundError as ValidationFileNotFoundError
 )
 
+# ===== Global Configuration Constants =====
+# Only these fields can be specified in config.json "options" section
+# These are the only settings that make sense to apply globally to all files
+ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level'}
+
 @dataclass
 class GenomeConfig:
     """
@@ -42,24 +47,16 @@ class GenomeConfig:
         coding_type: Compression format (GZIP, BZIP2, or NONE)
         detected_format: File format (FASTA or GENBANK)
         output_dir: Base output directory from config
-        extra: Additional non-validator fields from config
-        settings_dict: Validator-specific settings from config
-        global_options: Global options from config (validation_level, threads)
+        options: Merged global + file-level options (threads, validation_level only)
     """
     filename: str
     filepath: Path
     coding_type: CodingType = None
     detected_format: GenomeFormat = None
     output_dir: Path = None
-    extra: Dict[str, Any] = None
-    settings_dict: Dict[str, Any] = None
     global_options: Dict[str, Any] = None
 
     def __post_init__(self):
-        if self.extra is None:
-            self.extra = {}
-        if self.settings_dict is None:
-            self.settings_dict = {}
         if self.global_options is None:
             self.global_options = {}
 
@@ -75,9 +72,7 @@ class ReadConfig:
         coding_type: Compression format (GZIP, BZIP2, or NONE)
         detected_format: File format (FASTQ or BAM)
         output_dir: Base output directory from config
-        extra: Additional non-validator fields from config
-        settings_dict: Validator-specific settings from config
-        global_options: Global options from config (validation_level, threads)
+        options: Merged global + file-level options (threads, validation_level only)
     """
     filename: str
     filepath: Path
@@ -85,17 +80,11 @@ class ReadConfig:
     coding_type: CodingType = None
     detected_format: ReadFormat = None
     output_dir: Path = None
-    extra: Dict[str, Any] = None
-    settings_dict: Dict[str, Any] = None
     global_options: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.ngs_type not in ["illumina", "ont", "pacbio"]:
             raise ValueError(f"Invalid ngs_type: {self.ngs_type}")
-        if self.extra is None:
-            self.extra = {}
-        if self.settings_dict is None:
-            self.settings_dict = {}
         if self.global_options is None:
             self.global_options = {}
 
@@ -110,24 +99,16 @@ class FeatureConfig:
         coding_type: Compression format (GZIP, BZIP2, or NONE)
         detected_format: File format (GFF, GTF, or BED)
         output_dir: Base output directory from config
-        extra: Additional non-validator fields from config
-        settings_dict: Validator-specific settings from config
-        global_options: Global options from config (validation_level, threads)
+        options: Merged global + file-level options (threads, validation_level only)
     """
     filename: str
     filepath: Path
     coding_type: CodingType = None
     detected_format: FeatureFormat = None
     output_dir: Path = None
-    extra: Dict[str, Any] = None
-    settings_dict: Dict[str, Any] = None
     global_options: Dict[str, Any] = None
 
     def __post_init__(self):
-        if self.extra is None:
-            self.extra = {}
-        if self.settings_dict is None:
-            self.settings_dict = {}
         if self.global_options is None:
             self.global_options = {}
 
@@ -278,6 +259,8 @@ class ConfigManager:
         try:
             logger.debug("Validating configuration structure...")
             ConfigManager._validate_required_fields(data)
+            logger.debug("Parsing options...")
+            ConfigManager._parse_options(data, config)
             logger.debug("Setup base for outputs")
             ConfigManager._setup_output_directory(config)
             logger.debug("Parsing genome configurations...")
@@ -286,8 +269,6 @@ class ConfigManager:
             ConfigManager._parse_reads_configs(data, config)
             logger.debug("Parsing feature configurations...")
             ConfigManager._parse_feature_configs(data, config)
-            logger.debug("Parsing options...")
-            ConfigManager._parse_options(data, config)
 
             logger.info("✓ Configuration loaded and validated successfully")
             return config
@@ -343,28 +324,18 @@ class ConfigManager:
             field_name: Name of field for error messages
             config_dir: Base directory for resolving relative paths
             output_dir: Output directory for validated files
+            global_options: Global options from config (threads, validation_level)
 
         Returns:
             GenomeConfig with resolved paths and detected format/compression
         """
-        from validation_pkg.validators.genome_validator import GenomeValidator
         logger = get_logger()
 
         # Parse filename and extra fields using unified utility
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
 
-        # Extract validator-specific settings from extra fields
-        settings_dict, remaining_extra = ConfigManager._extract_validator_settings(extra, GenomeValidator)
-
-        # Log extracted settings
-        if settings_dict:
-            logger.debug(f"{field_name}: Extracted validator settings: {list(settings_dict.keys())}")
-
-        # Warn about remaining extra fields that are not validator settings
-        if remaining_extra:
-            logger.warning(
-                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
-            )
+        # Extract file-level global options (threads, validation_level only)
+        filelvl_options = ConfigManager._merge_options(field_name,global_options,extra)
 
         # Resolve absolute path with security validation
         filepath = ConfigManager._resolve_filepath(config_dir, filename)
@@ -382,10 +353,8 @@ class ConfigManager:
             filepath=filepath,
             coding_type=coding_type,
             detected_format=detected_format,
-            extra=remaining_extra,
-            settings_dict=settings_dict,
             output_dir=output_dir,
-            global_options=global_options if global_options is not None else {}
+            global_options=filelvl_options,
         )
     
     @staticmethod
@@ -461,35 +430,25 @@ class ConfigManager:
             field_name: Name of field for error messages
             config_dir: Base directory for resolving relative paths
             output_dir: Output directory for validated files
+            global_options: Global options from config (threads, validation_level)
 
         Returns:
             ReadConfig with resolved paths and detected format/compression
         """
-        from validation_pkg.validators.read_validator import ReadValidator
         logger = get_logger()
 
         # Parse filename and extra fields using unified utility
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
 
-        # Extract ngs_type first (it's a required field, not a validator setting)
+        # Extract ngs_type first (it's a required field, not a global option)
         ngs_type = extra.pop('ngs_type', 'illumina')
 
         if not ngs_type:
             raise ValueError("Missing required 'ngs_type'")
 
-        # Extract validator-specific settings from remaining extra fields
-        settings_dict, remaining_extra = ConfigManager._extract_validator_settings(extra, ReadValidator)
-
-        # Log extracted settings
-        if settings_dict:
-            logger.debug(f"{field_name}: Extracted validator settings: {list(settings_dict.keys())}")
-
-        # Warn about remaining extra fields that are not validator settings
-        if remaining_extra:
-            logger.warning(
-                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
-            )
-
+        # Extract file-level global options (threads, validation_level only)
+        filelvl_options = ConfigManager._merge_options(field_name,global_options,extra)
+        
         # Resolve absolute path with security validation
         filepath = ConfigManager._resolve_filepath(config_dir, filename)
 
@@ -508,9 +467,7 @@ class ConfigManager:
             coding_type=coding_type,
             detected_format=detected_format,
             output_dir=output_dir,
-            extra=remaining_extra,
-            settings_dict=settings_dict,
-            global_options=global_options if global_options is not None else {}
+            global_options=filelvl_options
         )
 
     @staticmethod
@@ -537,6 +494,8 @@ class ConfigManager:
             value: Config value (dict with 'filename' or string)
             field_name: Name of field for error messages
             config_dir: Base directory for resolving relative paths
+            output_dir: Output directory for validated files
+            global_options: Global options from config (threads, validation_level)
 
         Returns:
             FeatureConfig with resolved paths and detected format/compression
@@ -544,25 +503,14 @@ class ConfigManager:
         Raises:
             ValueError: If value format is invalid
         """
-        from validation_pkg.validators.feature_validator import FeatureValidator
         logger = get_logger()
 
         # Parse filename and extra fields using unified utility
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
 
-        # Extract validator-specific settings from extra fields
-        settings_dict, remaining_extra = ConfigManager._extract_validator_settings(extra, FeatureValidator)
-
-        # Log extracted settings
-        if settings_dict:
-            logger.debug(f"{field_name}: Extracted validator settings: {list(settings_dict.keys())}")
-
-        # Warn about remaining extra fields that are not validator settings
-        if remaining_extra:
-            logger.warning(
-                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
-            )
-
+        # Extract file-level global options (threads, validation_level only)
+        filelvl_options = ConfigManager._merge_options(field_name,global_options,extra)
+        
         # Resolve absolute path with security validation
         filepath = ConfigManager._resolve_filepath(config_dir, filename)
         if not filepath.exists():
@@ -579,9 +527,7 @@ class ConfigManager:
             coding_type=coding_type,
             detected_format=detected_format,
             output_dir=output_dir,
-            extra=remaining_extra,
-            settings_dict=settings_dict,
-            global_options=global_options if global_options is not None else {}
+            global_options=filelvl_options
         )
         
     @staticmethod
@@ -604,27 +550,27 @@ class ConfigManager:
         """
         logger = get_logger()
 
+        # Get options dict from config, or empty dict if not present
         if 'options' not in data:
             logger.debug("No options specified in config - using defaults")
-            return
+            options = {}
+        else:
+            options = data['options']
 
-        options = data['options']
+            if not isinstance(options, dict):
+                raise ConfigurationError("'options' must be a dictionary")
 
-        if not isinstance(options, dict):
-            raise ConfigurationError("'options' must be a dictionary")
+            # Validate that ONLY allowed fields are present
+            invalid_keys = set(options.keys()) - ALLOWED_GLOBAL_OPTIONS
 
-        # Validate that ONLY allowed fields are present
-        ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level'}
-        invalid_keys = set(options.keys()) - ALLOWED_GLOBAL_OPTIONS
+            if invalid_keys:
+                raise ConfigurationError(
+                    f"Invalid global options: {invalid_keys}. "
+                    f"Only 'threads' and 'validation_level' are allowed in global options. "
+                    f"Other settings should be specified per-file in the config."
+                )
 
-        if invalid_keys:
-            raise ConfigurationError(
-                f"Invalid global options: {invalid_keys}. "
-                f"Only 'threads' and 'validation_level' are allowed in global options. "
-                f"Other settings should be specified per-file in the config."
-            )
-
-        # Parse threads option
+        # Parse threads option (with default)
         if 'threads' in options:
             threads = options['threads']
 
@@ -653,7 +599,7 @@ class ConfigManager:
         else:
             logger.debug("Thread count: auto-detect (not specified)")
 
-        # Parse validation_level option
+        # Parse validation_level option (with default)
         if 'validation_level' in options:
             validation_level = options['validation_level']
 
@@ -676,50 +622,41 @@ class ConfigManager:
             logger.debug("validation_level not specified in global options")
 
     @staticmethod
-    def _extract_validator_settings(
-        extra: Dict[str, Any],
-        validator_class: Type
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        Extract validator-specific settings from config extra fields.
+    def _merge_options(field_name,global_options,extra) -> Dict:
+        logger = get_logger()
 
-        This method separates settings that belong to a validator's Settings class
-        from other config fields. It uses the validator's Settings class field names
-        to determine which keys are valid validator settings.
-
-        Args:
-            extra: Dictionary of extra fields from config.json
-            validator_class: Validator class (GenomeValidator, ReadValidator, or FeatureValidator)
-
-        Returns:
-            Tuple of (settings_dict, remaining_extra):
-                - settings_dict: Dict with valid validator settings
-                - remaining_extra: Dict with non-validator fields
-
-        Example:
-            >>> extra = {'validation_level': 'trust', 'ngs_type': 'illumina', 'custom_field': 'value'}
-            >>> settings, remaining = _extract_validator_settings(extra, ReadValidator)
-            >>> settings
-            {'validation_level': 'trust'}
-            >>> remaining
-            {'ngs_type': 'illumina', 'custom_field': 'value'}
-        """
-        from dataclasses import fields as dataclass_fields
-
-        # Get valid field names from the validator's Settings class
-        valid_settings = {f.name for f in dataclass_fields(validator_class.Settings)}
-
-        # Separate validator settings from other fields
-        settings_dict = {}
+        # Extract file-level global options (threads, validation_level only)
+        filelvl_options = {}
         remaining_extra = {}
 
-        for key, value in extra.items():
-            if key in valid_settings:
-                settings_dict[key] = value
+        filelvl_options.update(global_options)
+        for key, value_item in extra.items():
+            if key in ALLOWED_GLOBAL_OPTIONS:
+                # Only log override if the key existed in global_options
+                if key in filelvl_options:
+                    logger.warning(
+                        f"{field_name}: File-level option '{key}={value_item}' overrides "
+                        f"global option '{key}={filelvl_options[key]}'"
+                    )
+                else:
+                    logger.debug(
+                        f"{field_name}: File-level option '{key}={value_item}' specified"
+                    )
+                filelvl_options[key] = value_item
             else:
-                remaining_extra[key] = value
+                remaining_extra[key] = value_item
 
-        return settings_dict, remaining_extra
+        # Log file-level options
+        if filelvl_options:
+            logger.debug(f"{field_name}: Found file-level options: {list(filelvl_options.keys())}")
+
+        # Warn about remaining extra fields
+        if remaining_extra:
+            logger.warning(
+                f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
+            )
+
+        return filelvl_options
 
     @staticmethod
     def _setup_output_directory(config: Config):
