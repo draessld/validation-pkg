@@ -185,17 +185,87 @@ class FeatureValidator:
         Args:
             feature_config: FeatureConfig object from ConfigManager with file info
             output_dir: Directory for output files (Path object)
-            settings: Settings object with validation parameters (uses defaults if None)
+            settings: Settings object with validation parameters.
+                If None, uses settings from feature_config.settings_dict (if available),
+                otherwise uses defaults. If provided, merges with config settings
+                (user settings take precedence).
+
+        Settings precedence (highest to lowest):
+            1. Explicit user settings parameter
+            2. Config file settings (feature_config.settings_dict)
+            3. Default Settings values
 
         Example:
+            >>> # Example 1: Use config settings (if available)
+            >>> config = ConfigManager.load("config.json")
+            >>> validator = FeatureValidator(config.ref_feature, output_dir)
+            >>> # Uses validation_level, threads, etc. from config.json
+            >>>
+            >>> # Example 2: Override specific settings
             >>> settings = FeatureValidator.Settings()
             >>> settings = settings.update(sort_by_position=True)
-            >>> validator = FeatureValidator(feature_config, output_dir, settings)
+            >>> validator = FeatureValidator(config.ref_feature, output_dir, settings)
+            >>> # Uses sort_by_position=True (user) + other settings from config
         """
         self.logger = get_logger()
         self.feature_config = feature_config
         self.output_dir = Path(output_dir)
-        self.settings = settings if settings is not None else self.Settings()
+
+        # Apply 4-layer settings precedence:
+        # Layer 1: Defaults (lowest priority)
+        # Layer 2: Global options (validation_level, threads only)
+        # Layer 3: File-level config settings (all fields)
+        # Layer 4: User settings (highest priority)
+
+        # Layer 1: Start with defaults
+        merged_dict = self.Settings().to_dict()
+
+        # Layer 2: Apply global options (only validation_level and threads)
+        if feature_config.global_options:
+            for key, value in feature_config.global_options.items():
+                if key in merged_dict:
+                    merged_dict[key] = value
+                    self.logger.debug(f"Applied global option: {key}={value}")
+
+        # Layer 3: Apply file-level config settings (override global, all fields allowed)
+        if feature_config.settings_dict:
+            for key, value in feature_config.settings_dict.items():
+                # Warn if file-level overrides global option
+                if key in feature_config.global_options:
+                    old_value = feature_config.global_options[key]
+                    self.logger.warning(
+                        f"File-level setting '{key}={value}' overrides global option '{key}={old_value}' "
+                        f"for {feature_config.filename}"
+                    )
+                merged_dict[key] = value
+                self.logger.debug(f"Applied file-level setting: {key}={value}")
+
+        # Layer 4: Apply user settings (override everything)
+        if settings is not None:
+            user_dict = settings.to_dict()
+
+            # Log warnings for overrides
+            overridden = []
+            for key, new_value in user_dict.items():
+                old_value = merged_dict.get(key)
+                if old_value != new_value:
+                    # Determine source of overridden value
+                    if key in feature_config.settings_dict:
+                        source = "file-level setting"
+                    elif key in feature_config.global_options:
+                        source = "global option"
+                    else:
+                        source = "default"
+                    overridden.append(f"{key}: {old_value} ({source}) → {new_value} (user)")
+                merged_dict[key] = new_value
+
+            if overridden:
+                self.logger.warning(
+                    f"User-provided settings override config settings: {'; '.join(overridden)}"
+                )
+
+        # Create final settings object
+        self.settings = self.Settings.from_dict(merged_dict)
 
         # Validate validation_level setting
         valid_levels = {'strict', 'trust', 'minimal'}

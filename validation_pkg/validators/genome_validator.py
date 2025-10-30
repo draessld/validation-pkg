@@ -154,19 +154,89 @@ class GenomeValidator:
         Args:
             genome_config: GenomeConfig object from ConfigManager with file info
             output_dir: Directory for output files (Path object)
-            settings: Settings object with validation parameters (uses defaults if None)
+            settings: Settings object with validation parameters.
+                If None, uses settings from genome_config.settings_dict (if available),
+                otherwise uses defaults. If provided, merges with config settings
+                (user settings take precedence).
 
         Note: In future versions, output_dir may be moved to settings.
 
+        Settings precedence (highest to lowest):
+            1. Explicit user settings parameter
+            2. Config file settings (genome_config.settings_dict)
+            3. Default Settings values
+
         Example:
+            >>> # Example 1: Use config settings (if available)
+            >>> config = ConfigManager.load("config.json")
+            >>> validator = GenomeValidator(config.ref_genome, output_dir)
+            >>> # Uses validation_level, threads, etc. from config.json
+            >>>
+            >>> # Example 2: Override specific settings
             >>> settings = GenomeValidator.Settings()
             >>> settings = settings.update(replace_id_with="chr1")
-            >>> validator = GenomeValidator(genome_config, output_dir, settings)
+            >>> validator = GenomeValidator(config.ref_genome, output_dir, settings)
+            >>> # Uses replace_id_with='chr1' (user) + other settings from config
         """
         self.logger = get_logger()
         self.genome_config = genome_config
         self.output_dir = output_dir
-        self.settings = settings if settings is not None else self.Settings()
+
+        # Apply 4-layer settings precedence:
+        # Layer 1: Defaults (lowest priority)
+        # Layer 2: Global options (validation_level, threads only)
+        # Layer 3: File-level config settings (all fields)
+        # Layer 4: User settings (highest priority)
+
+        # Layer 1: Start with defaults
+        merged_dict = self.Settings().to_dict()
+
+        # Layer 2: Apply global options (only validation_level and threads)
+        if genome_config.global_options:
+            for key, value in genome_config.global_options.items():
+                if key in merged_dict:
+                    merged_dict[key] = value
+                    self.logger.debug(f"Applied global option: {key}={value}")
+
+        # Layer 3: Apply file-level config settings (override global, all fields allowed)
+        if genome_config.settings_dict:
+            for key, value in genome_config.settings_dict.items():
+                # Warn if file-level overrides global option
+                if key in genome_config.global_options:
+                    old_value = genome_config.global_options[key]
+                    self.logger.warning(
+                        f"File-level setting '{key}={value}' overrides global option '{key}={old_value}' "
+                        f"for {genome_config.filename}"
+                    )
+                merged_dict[key] = value
+                self.logger.debug(f"Applied file-level setting: {key}={value}")
+
+        # Layer 4: Apply user settings (override everything)
+        if settings is not None:
+            user_dict = settings.to_dict()
+
+            # Log warnings for overrides
+            overridden = []
+            for key, new_value in user_dict.items():
+                old_value = merged_dict.get(key)
+                if old_value != new_value:
+                    # Determine source of overridden value
+                    if key in genome_config.settings_dict:
+                        source = "file-level setting"
+                    elif key in genome_config.global_options:
+                        source = "global option"
+                    else:
+                        source = "default"
+                    overridden.append(f"{key}: {old_value} ({source}) → {new_value} (user)")
+                merged_dict[key] = new_value
+
+            if overridden:
+                self.logger.warning(
+                    f"User-provided settings override config settings: {'; '.join(overridden)}"
+                )
+
+        # Create final settings object
+        self.settings = self.Settings.from_dict(merged_dict)
 
         # Validate validation_level setting
         valid_levels = {'strict', 'trust', 'minimal'}

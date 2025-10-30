@@ -44,6 +44,7 @@ class GenomeConfig:
         output_dir: Base output directory from config
         extra: Additional non-validator fields from config
         settings_dict: Validator-specific settings from config
+        global_options: Global options from config (validation_level, threads)
     """
     filename: str
     filepath: Path
@@ -52,12 +53,15 @@ class GenomeConfig:
     output_dir: Path = None
     extra: Dict[str, Any] = None
     settings_dict: Dict[str, Any] = None
+    global_options: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.extra is None:
             self.extra = {}
         if self.settings_dict is None:
             self.settings_dict = {}
+        if self.global_options is None:
+            self.global_options = {}
 
 @dataclass
 class ReadConfig:
@@ -73,6 +77,7 @@ class ReadConfig:
         output_dir: Base output directory from config
         extra: Additional non-validator fields from config
         settings_dict: Validator-specific settings from config
+        global_options: Global options from config (validation_level, threads)
     """
     filename: str
     filepath: Path
@@ -82,6 +87,7 @@ class ReadConfig:
     output_dir: Path = None
     extra: Dict[str, Any] = None
     settings_dict: Dict[str, Any] = None
+    global_options: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.ngs_type not in ["illumina", "ont", "pacbio"]:
@@ -90,6 +96,8 @@ class ReadConfig:
             self.extra = {}
         if self.settings_dict is None:
             self.settings_dict = {}
+        if self.global_options is None:
+            self.global_options = {}
 
 @dataclass
 class FeatureConfig:
@@ -104,6 +112,7 @@ class FeatureConfig:
         output_dir: Base output directory from config
         extra: Additional non-validator fields from config
         settings_dict: Validator-specific settings from config
+        global_options: Global options from config (validation_level, threads)
     """
     filename: str
     filepath: Path
@@ -112,12 +121,15 @@ class FeatureConfig:
     output_dir: Path = None
     extra: Dict[str, Any] = None
     settings_dict: Dict[str, Any] = None
+    global_options: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.extra is None:
             self.extra = {}
         if self.settings_dict is None:
             self.settings_dict = {}
+        if self.global_options is None:
+            self.global_options = {}
 
 
 class Config:
@@ -304,25 +316,25 @@ class ConfigManager:
         """Parse genome and plasmid configurations."""
         # Required genomes
         config.ref_genome = ConfigManager._parse_genome_config(
-            data['ref_genome_filename'], 'ref_genome_filename', config.config_dir, config.output_dir
+            data['ref_genome_filename'], 'ref_genome_filename', config.config_dir, config.output_dir, config.options
         )
         config.mod_genome = ConfigManager._parse_genome_config(
-            data['mod_genome_filename'], 'mod_genome_filename', config.config_dir, config.output_dir 
+            data['mod_genome_filename'], 'mod_genome_filename', config.config_dir, config.output_dir, config.options
         )
-        
+
         # Optional plasmids
         if 'ref_plasmid_filename' in data and data['ref_plasmid_filename']:
             config.ref_plasmid = ConfigManager._parse_genome_config(
-                data['ref_plasmid_filename'], 'ref_plasmid_filename', config.config_dir, config.output_dir
+                data['ref_plasmid_filename'], 'ref_plasmid_filename', config.config_dir, config.output_dir, config.options
             )
-        
+
         if 'mod_plasmid_filename' in data and data['mod_plasmid_filename']:
             config.mod_plasmid = ConfigManager._parse_genome_config(
-                data['mod_plasmid_filename'], 'mod_plasmid_filename', config.config_dir, config.output_dir
+                data['mod_plasmid_filename'], 'mod_plasmid_filename', config.config_dir, config.output_dir, config.options
             )
     
     @staticmethod
-    def _parse_genome_config(value: Any, field_name: str, config_dir: Path, output_dir: Path) -> GenomeConfig:
+    def _parse_genome_config(value: Any, field_name: str, config_dir: Path, output_dir: Path, global_options: Dict[str, Any] = None) -> GenomeConfig:
         """
         Parse a genome configuration entry.
 
@@ -354,8 +366,8 @@ class ConfigManager:
                 f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
             )
 
-        # Resolve absolute path
-        filepath = config_dir / filename
+        # Resolve absolute path with security validation
+        filepath = ConfigManager._resolve_filepath(config_dir, filename)
 
         if not filepath.exists():
             raise ValidationFileNotFoundError(
@@ -372,7 +384,8 @@ class ConfigManager:
             detected_format=detected_format,
             extra=remaining_extra,
             settings_dict=settings_dict,
-            output_dir=output_dir
+            output_dir=output_dir,
+            global_options=global_options if global_options is not None else {}
         )
     
     @staticmethod
@@ -400,7 +413,7 @@ class ConfigManager:
                     raise ValueError("Cannot specify both 'filename' and 'directory' - use one or the other")
 
                 if filename:
-                    config.reads.append(ConfigManager._parse_read_config(read_entry,'filename',config.config_dir, config.output_dir))
+                    config.reads.append(ConfigManager._parse_read_config(read_entry,'filename',config.config_dir, config.output_dir, config.options))
 
                 if directory:
                     #   Resolve absolute path directory
@@ -433,13 +446,13 @@ class ConfigManager:
                             if key not in ['directory', 'filename', 'ngs_type']:
                                 file_entry[key] = value
 
-                        config.reads.append(ConfigManager._parse_read_config(file_entry, "", config.config_dir, config.output_dir))
+                        config.reads.append(ConfigManager._parse_read_config(file_entry, "", config.config_dir, config.output_dir, config.options))
             
             except ValueError as e:
                 raise ValueError(f"Invalid reads[{idx}]: {e}")
     
     @staticmethod
-    def _parse_read_config(value: Any, field_name: str, config_dir: Path, output_dir: Path) -> ReadConfig:
+    def _parse_read_config(value: Any, field_name: str, config_dir: Path, output_dir: Path, global_options: Dict[str, Any] = None) -> ReadConfig:
         """
         Parse a read configuration entry.
 
@@ -477,8 +490,8 @@ class ConfigManager:
                 f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
             )
 
-        # Resolve absolute path
-        filepath = config_dir / filename
+        # Resolve absolute path with security validation
+        filepath = ConfigManager._resolve_filepath(config_dir, filename)
 
         if not filepath.exists():
             raise ValidationFileNotFoundError(
@@ -496,7 +509,8 @@ class ConfigManager:
             detected_format=detected_format,
             output_dir=output_dir,
             extra=remaining_extra,
-            settings_dict=settings_dict
+            settings_dict=settings_dict,
+            global_options=global_options if global_options is not None else {}
         )
 
     @staticmethod
@@ -504,16 +518,16 @@ class ConfigManager:
         """Parse feature configurations."""
         if 'ref_feature_filename' in data and data['ref_feature_filename']:
             config.ref_feature = ConfigManager._parse_feature_config(
-                data['ref_feature_filename'], 'ref_feature_filename', config.config_dir, config.output_dir
+                data['ref_feature_filename'], 'ref_feature_filename', config.config_dir, config.output_dir, config.options
             )
-        
+
         if 'mod_feature_filename' in data and data['mod_feature_filename']:
             config.mod_feature = ConfigManager._parse_feature_config(
-                data['mod_feature_filename'], 'mod_feature_filename', config.config_dir, config.output_dir
+                data['mod_feature_filename'], 'mod_feature_filename', config.config_dir, config.output_dir, config.options
             )
     
     @staticmethod
-    def _parse_feature_config(value: Any, field_name: str, config_dir: Path, output_dir : Path) -> FeatureConfig:
+    def _parse_feature_config(value: Any, field_name: str, config_dir: Path, output_dir : Path, global_options: Dict[str, Any] = None) -> FeatureConfig:
         """
         Parse a single feature config entry and resolve paths.
 
@@ -549,8 +563,8 @@ class ConfigManager:
                 f"{field_name}: Found extra fields that will be ignored: {list(remaining_extra.keys())}"
             )
 
-        # Resolve absolute path and file existence
-        filepath = config_dir / filename
+        # Resolve absolute path with security validation
+        filepath = ConfigManager._resolve_filepath(config_dir, filename)
         if not filepath.exists():
             raise ValidationFileNotFoundError(
                 f"The following file was not found: {filepath}\n")
@@ -566,23 +580,27 @@ class ConfigManager:
             detected_format=detected_format,
             output_dir=output_dir,
             extra=remaining_extra,
-            settings_dict=settings_dict
+            settings_dict=settings_dict,
+            global_options=global_options if global_options is not None else {}
         )
         
     @staticmethod
     def _parse_options(data: dict, config: Config):
         """
-        Parse optional configuration options.
+        Parse and validate global configuration options.
 
-        Supported options:
-        - threads: Number of threads for parallel compression (positive integer)
+        Global options apply to ALL files in the config and can only contain:
+        - threads: Number of threads for parallelization (positive integer or null)
+        - validation_level: Validation strategy ('strict', 'trust', or 'minimal')
+
+        Other settings must be specified per-file in the config, not globally.
 
         Args:
             data: Configuration dictionary
             config: Config object to update
 
         Raises:
-            ValueError: If threads is invalid (not positive integer)
+            ConfigurationError: If invalid options provided or invalid values
         """
         logger = get_logger()
 
@@ -593,7 +611,18 @@ class ConfigManager:
         options = data['options']
 
         if not isinstance(options, dict):
-            raise ValueError("'options' must be a dictionary")
+            raise ConfigurationError("'options' must be a dictionary")
+
+        # Validate that ONLY allowed fields are present
+        ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level'}
+        invalid_keys = set(options.keys()) - ALLOWED_GLOBAL_OPTIONS
+
+        if invalid_keys:
+            raise ConfigurationError(
+                f"Invalid global options: {invalid_keys}. "
+                f"Only 'threads' and 'validation_level' are allowed in global options. "
+                f"Other settings should be specified per-file in the config."
+            )
 
         # Parse threads option
         if 'threads' in options:
@@ -606,7 +635,7 @@ class ConfigManager:
             elif isinstance(threads, int):
                 # Validate positive integer
                 if threads <= 0:
-                    raise ValueError(f"'threads' must be a positive integer, got {threads}")
+                    raise ConfigurationError(f"'threads' must be a positive integer, got {threads}")
 
                 # Warn if excessive (diminishing returns beyond 16)
                 if threads > 16:
@@ -615,20 +644,36 @@ class ConfigManager:
                         f"Consider using 4-8 threads for optimal performance."
                     )
 
-                logger.info(f"Using {threads} threads for parallel compression")
+                logger.info(f"Global option: threads={threads}")
                 config.options['threads'] = threads
             else:
-                raise ValueError(
+                raise ConfigurationError(
                     f"'threads' must be an integer or null, got {type(threads).__name__}: {threads}"
                 )
         else:
-            logger.info("Thread count: auto-detect (not specified)")
+            logger.debug("Thread count: auto-detect (not specified)")
 
-        # Store any other options for future use
-        for key, value in options.items():
-            if key not in ['threads']:
-                config.options[key] = value
-                logger.debug(f"Stored option '{key}': {value}")
+        # Parse validation_level option
+        if 'validation_level' in options:
+            validation_level = options['validation_level']
+
+            VALID_LEVELS = {'strict', 'trust', 'minimal'}
+
+            if not isinstance(validation_level, str):
+                raise ConfigurationError(
+                    f"'validation_level' must be a string, got {type(validation_level).__name__}: {validation_level}"
+                )
+
+            if validation_level not in VALID_LEVELS:
+                raise ConfigurationError(
+                    f"Invalid validation_level '{validation_level}'. "
+                    f"Must be one of: {', '.join(sorted(VALID_LEVELS))}"
+                )
+
+            logger.info(f"Global option: validation_level={validation_level}")
+            config.options['validation_level'] = validation_level
+        else:
+            logger.debug("validation_level not specified in global options")
 
     @staticmethod
     def _extract_validator_settings(
@@ -708,7 +753,58 @@ class ConfigManager:
             error_msg = f"Failed to create output directory: {e}"
             logger.error(error_msg)
             raise ConfigurationError(error_msg) from e
-        
+
+    @staticmethod
+    def _resolve_filepath(base_dir: Path, filename: str) -> Path:
+        """
+        Resolve filepath relative to base directory with path traversal protection.
+
+        This method prevents path traversal attacks by ensuring the resolved path
+        stays within the base directory. It handles relative paths with '..' and
+        symlinks by resolving to absolute canonical paths, then validating the
+        resolved path is still within the allowed base directory.
+
+        Args:
+            base_dir: Base directory (e.g., config_dir) - files must be under this
+            filename: Filename or relative path from config file
+
+        Returns:
+            Resolved absolute Path object
+
+        Raises:
+            ConfigurationError: If path traverses outside base directory
+
+        Examples:
+            >>> _resolve_filepath(Path("/home/user/project"), "genome.fasta")
+            Path("/home/user/project/genome.fasta")
+
+            >>> _resolve_filepath(Path("/home/user/project"), "../../../etc/passwd")
+            ConfigurationError: Path traversal detected
+
+        Security:
+            - Prevents directory traversal attacks (../..)
+            - Resolves symlinks to their targets
+            - Validates resolved path is within base_dir
+        """
+        # Resolve to absolute canonical paths
+        filepath = (base_dir / filename).resolve()
+        base_dir_resolved = base_dir.resolve()
+
+        # Check if filepath is within base_dir
+        # Use try/except for Python 3.7/3.8 compatibility (is_relative_to added in 3.9)
+        try:
+            filepath.relative_to(base_dir_resolved)
+        except ValueError:
+            # Path is outside base directory - security violation
+            raise ConfigurationError(
+                f"Path traversal detected: '{filename}' resolves outside config directory.\n"
+                f"Resolved path: {filepath}\n"
+                f"Config directory: {base_dir_resolved}\n"
+                f"Only files within the config directory are allowed."
+            )
+
+        return filepath
+
     @staticmethod
     def _detect_compression_type(filepath: Path) -> CodingType:
         """

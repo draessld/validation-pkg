@@ -155,19 +155,89 @@ class ReadValidator:
         Args:
             read_config: ReadConfig object from ConfigManager with file info
             output_dir: Directory for output files (Path object)
-            settings: Settings object with validation parameters (uses defaults if None)
+            settings: Settings object with validation parameters.
+                If None, uses settings from read_config.settings_dict (if available),
+                otherwise uses defaults. If provided, merges with config settings
+                (user settings take precedence).
 
         Note: In future versions, output_dir may be moved to settings.
 
+        Settings precedence (highest to lowest):
+            1. Explicit user settings parameter
+            2. Config file settings (read_config.settings_dict)
+            3. Default Settings values
+
         Example:
+            >>> # Example 1: Use config settings (if available)
+            >>> config = ConfigManager.load("config.json")
+            >>> validator = ReadValidator(config.reads[0], output_dir)
+            >>> # Uses validation_level, threads, etc. from config.json
+            >>>
+            >>> # Example 2: Override specific settings
             >>> settings = ReadValidator.Settings()
             >>> settings = settings.update(sequence_prefix="chr1")
-            >>> validator = ReadValidator(read_config, output_dir, settings)
+            >>> validator = ReadValidator(config.reads[0], output_dir, settings)
+            >>> # Uses sequence_prefix='chr1' (user) + other settings from config
         """
         self.logger = get_logger()
         self.read_config = read_config
         self.output_dir = Path(output_dir)
-        self.settings = settings if settings is not None else self.Settings()
+
+        # Apply 4-layer settings precedence:
+        # Layer 1: Defaults (lowest priority)
+        # Layer 2: Global options (validation_level, threads only)
+        # Layer 3: File-level config settings (all fields)
+        # Layer 4: User settings (highest priority)
+
+        # Layer 1: Start with defaults
+        merged_dict = self.Settings().to_dict()
+
+        # Layer 2: Apply global options (only validation_level and threads)
+        if read_config.global_options:
+            for key, value in read_config.global_options.items():
+                if key in merged_dict:
+                    merged_dict[key] = value
+                    self.logger.debug(f"Applied global option: {key}={value}")
+
+        # Layer 3: Apply file-level config settings (override global, all fields allowed)
+        if read_config.settings_dict:
+            for key, value in read_config.settings_dict.items():
+                # Warn if file-level overrides global option
+                if key in read_config.global_options:
+                    old_value = read_config.global_options[key]
+                    self.logger.warning(
+                        f"File-level setting '{key}={value}' overrides global option '{key}={old_value}' "
+                        f"for {read_config.filename}"
+                    )
+                merged_dict[key] = value
+                self.logger.debug(f"Applied file-level setting: {key}={value}")
+
+        # Layer 4: Apply user settings (override everything)
+        if settings is not None:
+            user_dict = settings.to_dict()
+
+            # Log warnings for overrides
+            overridden = []
+            for key, new_value in user_dict.items():
+                old_value = merged_dict.get(key)
+                if old_value != new_value:
+                    # Determine source of overridden value
+                    if key in read_config.settings_dict:
+                        source = "file-level setting"
+                    elif key in read_config.global_options:
+                        source = "global option"
+                    else:
+                        source = "default"
+                    overridden.append(f"{key}: {old_value} ({source}) → {new_value} (user)")
+                merged_dict[key] = new_value
+
+            if overridden:
+                self.logger.warning(
+                    f"User-provided settings override config settings: {'; '.join(overridden)}"
+                )
+
+        # Create final settings object
+        self.settings = self.Settings.from_dict(merged_dict)
 
         # Validate validation_level setting
         valid_levels = {'strict', 'trust', 'minimal'}
@@ -284,89 +354,38 @@ class ReadValidator:
 
     def _count_lines_fast(self) -> int:
         """
-        Fast line counting using zcat/bzcat for compressed files.
+        Fast line counting using Python file iteration.
 
-        Uses shell commands for efficient line counting without loading file into memory:
-        - gzip (.gz): zcat file.gz | wc -l
-        - bzip2 (.bz2): bzcat file.bz2 | wc -l
-        - uncompressed: wc -l file
+        Uses Python's built-in gzip/bz2 libraries for secure line counting:
+        - gzip (.gz): gzip.open() with text mode
+        - bzip2 (.bz2): bz2.open() with text mode
+        - uncompressed: open() with text mode
 
-        Note: wc -l counts newline characters, not lines. If a file doesn't end with
-        a newline, we need to add 1 to the count. We check if the last byte is a newline.
+        This method is secure against command injection attacks (no shell commands)
+        and works efficiently by iterating over lines without loading entire file
+        into memory.
 
         Returns:
             Number of lines in the file
 
         Raises:
             ReadValidationError: If line counting fails
+
+        Security:
+            This implementation uses Python libraries exclusively (no subprocess or
+            shell commands), preventing command injection vulnerabilities.
         """
-        import subprocess
+        from validation_pkg.utils.file_handler import open_file_with_coding_type
 
         try:
-            # Count newline characters
-            if self.read_config.coding_type == CT.GZIP:
-                # Use zcat for gzip files
-                result = subprocess.run(
-                    ['sh', '-c', f'zcat "{self.input_path}" | wc -l'],
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # 5 minutes timeout
-                )
-            elif self.read_config.coding_type == CT.BZIP2:
-                # Use bzcat for bzip2 files
-                result = subprocess.run(
-                    ['sh', '-c', f'bzcat "{self.input_path}" | wc -l'],
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # 5 minutes timeout
-                )
-            else:
-                # Use wc -l for uncompressed files
-                result = subprocess.run(
-                    ['wc', '-l', str(self.input_path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-
-            if result.returncode != 0:
-                raise ReadValidationError(f"Line counting failed: {result.stderr}")
-
-            # Parse output - wc -l returns "count filename" or just "count"
-            line_count = int(result.stdout.strip().split()[0])
-
-            # Check if file ends with newline - wc -l counts newline chars, not lines
-            # If file doesn't end with newline, we need to add 1
-            if self.read_config.coding_type == CT.GZIP:
-                # Check last byte of decompressed content
-                last_byte_result = subprocess.run(
-                    ['sh', '-c', f'zcat "{self.input_path}" | tail -c 1'],
-                    capture_output=True,
-                    timeout=30
-                )
-                if last_byte_result.returncode == 0 and last_byte_result.stdout and last_byte_result.stdout[-1:] != b'\n':
-                    line_count += 1
-            elif self.read_config.coding_type == CT.BZIP2:
-                # Check last byte of decompressed content
-                last_byte_result = subprocess.run(
-                    ['sh', '-c', f'bzcat "{self.input_path}" | tail -c 1'],
-                    capture_output=True,
-                    timeout=30
-                )
-                if last_byte_result.returncode == 0 and last_byte_result.stdout and last_byte_result.stdout[-1:] != b'\n':
-                    line_count += 1
-            else:
-                # Check last byte of uncompressed file
-                if self.input_path.stat().st_size > 0:
-                    with open(self.input_path, 'rb') as f:
-                        f.seek(-1, 2)  # Seek to last byte
-                        last_byte = f.read(1)
-                        if last_byte != b'\n':
-                            line_count += 1
+            # Count lines using Python file iteration (no shell commands)
+            # This is secure against command injection and works for all compression types
+            with open_file_with_coding_type(self.input_path, self.read_config.coding_type, mode='rt') as f:
+                line_count = sum(1 for _ in f)
 
             return line_count
 
-        except subprocess.TimeoutExpired:
+        except TimeoutError:
             raise ReadValidationError("Line counting timed out - file too large")
         except (ValueError, IndexError) as e:
             raise ReadValidationError(f"Failed to parse line count: {e}")

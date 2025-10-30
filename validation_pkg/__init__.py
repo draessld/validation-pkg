@@ -138,12 +138,12 @@ def _validate_single_file(args):
     It must be a module-level function (not nested) to be picklable.
 
     Args:
-        args: Tuple of (validator_type, config, output_dir, settings_dict, config_threads, worker_id)
+        args: Tuple of (validator_type, config, output_dir, settings_dict, worker_id)
 
     Returns:
         dict: Result with 'success', 'filename', 'error' keys
     """
-    validator_type, config, output_dir, settings_dict, config_threads, worker_id = args
+    validator_type, config, output_dir, settings_dict, worker_id = args
 
     try:
         # Import validators and logger inside worker process
@@ -198,8 +198,7 @@ def _validate_single_file(args):
 def validate_genome(
     genome_config,
     output_dir: Union[str, Path],
-    settings: Optional[GenomeValidator.Settings] = None,
-    config_threads: Optional[int] = None
+    settings: Optional[GenomeValidator.Settings] = None
 ) -> dict:
     """
     Validate a genome file with optional custom settings.
@@ -210,7 +209,6 @@ def validate_genome(
         genome_config: GenomeConfig object (from ConfigManager)
         output_dir: Directory for output files
         settings: Optional GenomeValidator.Settings object (uses defaults if None)
-        config_threads: Thread count from config.get_threads() (for internal use)
 
     Example:
         >>> config = ConfigManager.load("config.json")
@@ -222,26 +220,8 @@ def validate_genome(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Apply settings from config if available
-    if settings is None:
-        # No user settings provided - use config settings if available
-        if genome_config.settings_dict:
-            settings = GenomeValidator.Settings.from_dict(genome_config.settings_dict)
-        else:
-            settings = GenomeValidator.Settings()
-    else:
-        # User settings provided - merge with config settings (user takes precedence)
-        if genome_config.settings_dict:
-            # Start with config settings, then apply user settings on top
-            merged_settings = genome_config.settings_dict.copy()
-            merged_settings.update(settings.to_dict())
-            settings = GenomeValidator.Settings.from_dict(merged_settings)
-
-    # If threads specified in config but not in settings, apply it
-    if config_threads is not None:
-        if settings.compression_threads is None:
-            settings = settings.update(compression_threads=config_threads)
-
+    # Validators automatically apply 4-layer settings:
+    # 1. Defaults → 2. Global options → 3. File-level settings → 4. User settings
     validator = GenomeValidator(genome_config, output_path, settings)
     validator.validate()
 
@@ -249,8 +229,7 @@ def validate_genome(
 def validate_read(
     read_config,
     output_dir: Union[str, Path],
-    settings: Optional[ReadValidator.Settings] = None,
-    config_threads: Optional[int] = None
+    settings: Optional[ReadValidator.Settings] = None
 ) -> dict:
     """
     Validate a single read file with optional custom settings.
@@ -261,8 +240,6 @@ def validate_read(
         read_config: ReadConfig object (from ConfigManager)
         output_dir: Directory for output files
         settings: Optional ReadValidator.Settings object (uses defaults if None)
-        config_threads: Thread count from config.get_threads() (for internal use)
-
 
     Example:
         >>> config = ConfigManager.load("config.json")
@@ -274,26 +251,8 @@ def validate_read(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Apply settings from config if available
-    if settings is None:
-        # No user settings provided - use config settings if available
-        if read_config.settings_dict:
-            settings = ReadValidator.Settings.from_dict(read_config.settings_dict)
-        else:
-            settings = ReadValidator.Settings()
-    else:
-        # User settings provided - merge with config settings (user takes precedence)
-        if read_config.settings_dict:
-            # Start with config settings, then apply user settings on top
-            merged_settings = read_config.settings_dict.copy()
-            merged_settings.update(settings.to_dict())
-            settings = ReadValidator.Settings.from_dict(merged_settings)
-
-    # If threads specified in config but not in settings, apply it
-    if config_threads is not None:
-        if settings.compression_threads is None:
-            settings = settings.update(compression_threads=config_threads)
-
+    # Validators automatically apply 4-layer settings:
+    # 1. Defaults → 2. Global options → 3. File-level settings → 4. User settings
     validator = ReadValidator(read_config, output_path, settings)
     validator.validate()
 
@@ -301,8 +260,7 @@ def validate_read(
 def validate_reads(
     read_configs: List,
     output_dir: Union[str, Path],
-    settings: Optional[ReadValidator.Settings] = None,
-    config_threads: Optional[int] = None
+    settings: Optional[ReadValidator.Settings] = None
 ) -> List[dict]:
     """
     Validate multiple read files with optional custom settings.
@@ -313,7 +271,6 @@ def validate_reads(
         read_configs: List of ReadConfig objects (from ConfigManager)
         output_dir: Directory for output files
         settings: Optional ReadValidator.Settings object (uses defaults if None)
-        config_threads: Thread count from config.get_threads() (for internal use)
 
     Returns:
         List of validation results (dicts with 'success', 'filename', 'error' keys)
@@ -353,11 +310,6 @@ def validate_reads(
                 file_settings = ReadValidator.Settings.from_dict(merged_settings)
             else:
                 file_settings = settings.copy()
-
-        # Apply threads from config
-        if config_threads is not None:
-            if file_settings.compression_threads is None:
-                file_settings = file_settings.update(compression_threads=config_threads)
 
         # Set output subdirectory by ngs_type
         file_settings = file_settings.update(output_subdir_name=read_config.ngs_type)
@@ -406,7 +358,7 @@ def validate_reads(
 
         results = []
         args_list = [
-            ('read', read_config, str(output_path), file_settings.to_dict(), config_threads, worker_id)
+            ('read', read_config, str(output_path), file_settings.to_dict(), worker_id)
             for worker_id, (read_config, file_settings) in enumerate(tasks, start=1)
         ]
 
@@ -480,8 +432,7 @@ def validate_reads(
 def validate_genomes(
     genome_configs: List,
     output_dir: Union[str, Path],
-    settings: Optional[GenomeValidator.Settings] = None,
-    config_threads: Optional[int] = None
+    settings: Optional[GenomeValidator.Settings] = None
 ) -> List[dict]:
     """
     Validate multiple genome files with optional custom settings.
@@ -492,7 +443,6 @@ def validate_genomes(
         genome_configs: List of GenomeConfig objects (from ConfigManager)
         output_dir: Directory for output files
         settings: Optional GenomeValidator.Settings object (uses defaults if None)
-        config_threads: Thread count from config.get_threads() (for internal use)
 
     Returns:
         List of validation results (dicts with 'success', 'filename', 'error' keys)
@@ -525,10 +475,6 @@ def validate_genomes(
                 file_settings = GenomeValidator.Settings.from_dict(merged_settings)
             else:
                 file_settings = settings.copy()
-
-        if config_threads is not None:
-            if file_settings.compression_threads is None:
-                file_settings = file_settings.update(compression_threads=config_threads)
 
         tasks.append((genome_config, file_settings))
 
@@ -573,7 +519,7 @@ def validate_genomes(
 
         results = []
         args_list = [
-            ('genome', genome_config, str(output_path), file_settings.to_dict(), config_threads, worker_id)
+            ('genome', genome_config, str(output_path), file_settings.to_dict(), worker_id)
             for worker_id, (genome_config, file_settings) in enumerate(tasks, start=1)
         ]
 
@@ -643,8 +589,7 @@ def validate_genomes(
 def validate_feature(
     feature_config,
     output_dir: Union[str, Path],
-    settings: Optional[FeatureValidator.Settings] = None,
-    config_threads: Optional[int] = None
+    settings: Optional[FeatureValidator.Settings] = None
 ) -> dict:
     """
     Validate a feature annotation file with optional custom settings.
@@ -655,8 +600,6 @@ def validate_feature(
         feature_config: FeatureConfig object (from ConfigManager)
         output_dir: Directory for output files
         settings: Optional FeatureValidator.Settings object (uses defaults if None)
-        config_threads: Thread count from config.get_threads() (for internal use)
-
 
     Example:
         >>> config = ConfigManager.load("config.json")
@@ -668,26 +611,8 @@ def validate_feature(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Apply settings from config if available
-    if settings is None:
-        # No user settings provided - use config settings if available
-        if feature_config.settings_dict:
-            settings = FeatureValidator.Settings.from_dict(feature_config.settings_dict)
-        else:
-            settings = FeatureValidator.Settings()
-    else:
-        # User settings provided - merge with config settings (user takes precedence)
-        if feature_config.settings_dict:
-            # Start with config settings, then apply user settings on top
-            merged_settings = feature_config.settings_dict.copy()
-            merged_settings.update(settings.to_dict())
-            settings = FeatureValidator.Settings.from_dict(merged_settings)
-
-    # If threads specified in config but not in settings, apply it
-    if config_threads is not None:
-        if settings.compression_threads is None:
-            settings = settings.update(compression_threads=config_threads)
-
+    # Validators automatically apply 4-layer settings:
+    # 1. Defaults → 2. Global options → 3. File-level settings → 4. User settings
     validator = FeatureValidator(feature_config, output_path, settings)
     validator.validate()
 
@@ -695,8 +620,7 @@ def validate_feature(
 def validate_features_list(
     feature_configs: List,
     output_dir: Union[str, Path],
-    settings: Optional[FeatureValidator.Settings] = None,
-    config_threads: Optional[int] = None
+    settings: Optional[FeatureValidator.Settings] = None
 ) -> List[dict]:
     """
     Validate multiple feature annotation files with optional custom settings.
@@ -707,7 +631,6 @@ def validate_features_list(
         feature_configs: List of FeatureConfig objects (from ConfigManager)
         output_dir: Directory for output files
         settings: Optional FeatureValidator.Settings object (uses defaults if None)
-        config_threads: Thread count from config.get_threads() (for internal use)
 
     Returns:
         List of validation results (dicts with 'success', 'filename', 'error' keys)
@@ -740,10 +663,6 @@ def validate_features_list(
                 file_settings = FeatureValidator.Settings.from_dict(merged_settings)
             else:
                 file_settings = settings.copy()
-
-        if config_threads is not None:
-            if file_settings.compression_threads is None:
-                file_settings = file_settings.update(compression_threads=config_threads)
 
         tasks.append((feature_config, file_settings))
 
@@ -788,7 +707,7 @@ def validate_features_list(
 
         results = []
         args_list = [
-            ('feature', feature_config, str(output_path), file_settings.to_dict(), config_threads, worker_id)
+            ('feature', feature_config, str(output_path), file_settings.to_dict(), worker_id)
             for worker_id, (feature_config, file_settings) in enumerate(tasks, start=1)
         ]
 

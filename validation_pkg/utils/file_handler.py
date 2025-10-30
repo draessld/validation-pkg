@@ -426,20 +426,64 @@ def gz_to_bz2(gz_file: Path, bz2_file: Path, threads: int = None):
     Convert gzip compressed file to bzip2.
 
     Uses parallel tools (pigz/pbzip2) if available, falls back to gzip/bzip2.
+    Securely pipes decompression to compression using subprocess.Popen without shell.
 
     Args:
         gz_file: Path to input .gz file
         bz2_file: Path to output .bz2 file
         threads: Number of threads to use (None = auto-detect)
+
+    Raises:
+        CompressionError: If conversion fails
+
+    Security:
+        Uses subprocess.Popen with list arguments (no shell=True) to prevent
+        command injection attacks through malicious filenames.
     """
     # Get best available compression commands
     decompress_cmd, decompress_args = get_compression_command(CodingType.GZIP, 'decompress', threads)
     compress_cmd, compress_args = get_compression_command(CodingType.BZIP2, 'compress', threads)
 
-    # Build piped command
-    cmd = f"set -o pipefail && {decompress_cmd} {' '.join(decompress_args)} {gz_file} | {compress_cmd} {' '.join(compress_args)} > {bz2_file}"
+    try:
+        # Create decompression process (reads input file, writes to stdout)
+        decompress_proc = subprocess.Popen(
+            [decompress_cmd] + decompress_args + [str(gz_file)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
 
-    subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        # Create compression process (reads from stdin, writes to output file)
+        with open(bz2_file, 'wb') as output_file:
+            compress_proc = subprocess.Popen(
+                [compress_cmd] + compress_args,
+                stdin=decompress_proc.stdout,
+                stdout=output_file,
+                stderr=subprocess.PIPE
+            )
+
+            # Close decompress stdout in parent to allow SIGPIPE propagation
+            decompress_proc.stdout.close()
+
+            # Wait for both processes to complete
+            compress_stdout, compress_stderr = compress_proc.communicate()
+            decompress_returncode = decompress_proc.wait()
+
+            # Check for errors
+            if decompress_returncode != 0:
+                _, decompress_stderr = decompress_proc.communicate()
+                raise CompressionError(
+                    f"Decompression failed (gzip): {decompress_stderr.decode('utf-8', errors='replace')}"
+                )
+
+            if compress_proc.returncode != 0:
+                raise CompressionError(
+                    f"Compression failed (bzip2): {compress_stderr.decode('utf-8', errors='replace')}"
+                )
+
+    except (OSError, FileNotFoundError) as e:
+        raise CompressionError(f"Compression tool not found: {e}") from e
+    except Exception as e:
+        raise CompressionError(f"Compression conversion failed: {e}") from e
 
 
 def bz2_to_gz(bz2_file: Path, gz_file: Path, threads: int = None):
@@ -447,20 +491,64 @@ def bz2_to_gz(bz2_file: Path, gz_file: Path, threads: int = None):
     Convert bzip2 compressed file to gzip.
 
     Uses parallel tools (pbzip2/pigz) if available, falls back to bzip2/gzip.
+    Securely pipes decompression to compression using subprocess.Popen without shell.
 
     Args:
         bz2_file: Path to input .bz2 file
         gz_file: Path to output .gz file
         threads: Number of threads to use (None = auto-detect)
+
+    Raises:
+        CompressionError: If conversion fails
+
+    Security:
+        Uses subprocess.Popen with list arguments (no shell=True) to prevent
+        command injection attacks through malicious filenames.
     """
     # Get best available compression commands
     decompress_cmd, decompress_args = get_compression_command(CodingType.BZIP2, 'decompress', threads)
     compress_cmd, compress_args = get_compression_command(CodingType.GZIP, 'compress', threads)
 
-    # Build piped command
-    cmd = f"set -o pipefail && {decompress_cmd} {' '.join(decompress_args)} {bz2_file} | {compress_cmd} {' '.join(compress_args)} > {gz_file}"
+    try:
+        # Create decompression process (reads input file, writes to stdout)
+        decompress_proc = subprocess.Popen(
+            [decompress_cmd] + decompress_args + [str(bz2_file)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
 
-    subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        # Create compression process (reads from stdin, writes to output file)
+        with open(gz_file, 'wb') as output_file:
+            compress_proc = subprocess.Popen(
+                [compress_cmd] + compress_args,
+                stdin=decompress_proc.stdout,
+                stdout=output_file,
+                stderr=subprocess.PIPE
+            )
+
+            # Close decompress stdout in parent to allow SIGPIPE propagation
+            decompress_proc.stdout.close()
+
+            # Wait for both processes to complete
+            compress_stdout, compress_stderr = compress_proc.communicate()
+            decompress_returncode = decompress_proc.wait()
+
+            # Check for errors
+            if decompress_returncode != 0:
+                _, decompress_stderr = decompress_proc.communicate()
+                raise CompressionError(
+                    f"Decompression failed (bzip2): {decompress_stderr.decode('utf-8', errors='replace')}"
+                )
+
+            if compress_proc.returncode != 0:
+                raise CompressionError(
+                    f"Compression failed (gzip): {compress_stderr.decode('utf-8', errors='replace')}"
+                )
+
+    except (OSError, FileNotFoundError) as e:
+        raise CompressionError(f"Compression tool not found: {e}") from e
+    except Exception as e:
+        raise CompressionError(f"Compression conversion failed: {e}") from e
 
 def none_to_gz(none_file: Path, gz_file: Path, threads: int = None):
     """
@@ -472,11 +560,31 @@ def none_to_gz(none_file: Path, gz_file: Path, threads: int = None):
         none_file: Path to input uncompressed file
         gz_file: Path to output .gz file
         threads: Number of threads to use (None = auto-detect)
+
+    Raises:
+        CompressionError: If compression fails
+
+    Security:
+        Uses subprocess with list arguments (no shell=True) to prevent
+        command injection attacks through malicious filenames.
     """
     compress_cmd, compress_args = get_compression_command(CodingType.GZIP, 'compress', threads)
 
-    cmd = f"{compress_cmd} {' '.join(compress_args)} {none_file} > {gz_file}"
-    subprocess.run(cmd, shell=True, check=True)
+    try:
+        with open(none_file, 'rb') as input_file, open(gz_file, 'wb') as output_file:
+            result = subprocess.run(
+                [compress_cmd] + compress_args,
+                stdin=input_file,
+                stdout=output_file,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+    except subprocess.CalledProcessError as e:
+        raise CompressionError(
+            f"Compression failed (gzip): {e.stderr.decode('utf-8', errors='replace')}"
+        ) from e
+    except (OSError, FileNotFoundError) as e:
+        raise CompressionError(f"Compression tool not found: {e}") from e
 
 def gz_to_none(gz_file: Path, none_file: Path, threads: int = None):
     """
@@ -488,11 +596,30 @@ def gz_to_none(gz_file: Path, none_file: Path, threads: int = None):
         gz_file: Path to input .gz file
         none_file: Path to output uncompressed file
         threads: Number of threads to use (None = auto-detect)
+
+    Raises:
+        CompressionError: If decompression fails
+
+    Security:
+        Uses subprocess with list arguments (no shell=True) to prevent
+        command injection attacks through malicious filenames.
     """
     decompress_cmd, decompress_args = get_compression_command(CodingType.GZIP, 'decompress', threads)
 
-    cmd = f"{decompress_cmd} {' '.join(decompress_args)} {gz_file} > {none_file}"
-    subprocess.run(cmd, shell=True, check=True)
+    try:
+        with open(none_file, 'wb') as output_file:
+            result = subprocess.run(
+                [decompress_cmd] + decompress_args + [str(gz_file)],
+                stdout=output_file,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+    except subprocess.CalledProcessError as e:
+        raise CompressionError(
+            f"Decompression failed (gzip): {e.stderr.decode('utf-8', errors='replace')}"
+        ) from e
+    except (OSError, FileNotFoundError) as e:
+        raise CompressionError(f"Compression tool not found: {e}") from e
 
 def bz2_to_none(bz2_file: Path, none_file: Path, threads: int = None):
     """
@@ -504,11 +631,30 @@ def bz2_to_none(bz2_file: Path, none_file: Path, threads: int = None):
         bz2_file: Path to input .bz2 file
         none_file: Path to output uncompressed file
         threads: Number of threads to use (None = auto-detect)
+
+    Raises:
+        CompressionError: If decompression fails
+
+    Security:
+        Uses subprocess with list arguments (no shell=True) to prevent
+        command injection attacks through malicious filenames.
     """
     decompress_cmd, decompress_args = get_compression_command(CodingType.BZIP2, 'decompress', threads)
 
-    cmd = f"{decompress_cmd} {' '.join(decompress_args)} {bz2_file} > {none_file}"
-    subprocess.run(cmd, shell=True, check=True)
+    try:
+        with open(none_file, 'wb') as output_file:
+            result = subprocess.run(
+                [decompress_cmd] + decompress_args + [str(bz2_file)],
+                stdout=output_file,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+    except subprocess.CalledProcessError as e:
+        raise CompressionError(
+            f"Decompression failed (bzip2): {e.stderr.decode('utf-8', errors='replace')}"
+        ) from e
+    except (OSError, FileNotFoundError) as e:
+        raise CompressionError(f"Compression tool not found: {e}") from e
 
 def none_to_bz2(none_file: Path, bz2_file: Path, threads: int = None):
     """
@@ -520,11 +666,31 @@ def none_to_bz2(none_file: Path, bz2_file: Path, threads: int = None):
         none_file: Path to input uncompressed file
         bz2_file: Path to output .bz2 file
         threads: Number of threads to use (None = auto-detect)
+
+    Raises:
+        CompressionError: If compression fails
+
+    Security:
+        Uses subprocess with list arguments (no shell=True) to prevent
+        command injection attacks through malicious filenames.
     """
     compress_cmd, compress_args = get_compression_command(CodingType.BZIP2, 'compress', threads)
 
-    cmd = f"{compress_cmd} {' '.join(compress_args)} {none_file} > {bz2_file}"
-    subprocess.run(cmd, shell=True, check=True)
+    try:
+        with open(none_file, 'rb') as input_file, open(bz2_file, 'wb') as output_file:
+            result = subprocess.run(
+                [compress_cmd] + compress_args,
+                stdin=input_file,
+                stdout=output_file,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+    except subprocess.CalledProcessError as e:
+        raise CompressionError(
+            f"Compression failed (bzip2): {e.stderr.decode('utf-8', errors='replace')}"
+        ) from e
+    except (OSError, FileNotFoundError) as e:
+        raise CompressionError(f"Compression tool not found: {e}") from e
 
 
 def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, use_parallel: bool = True, threads: int = None):
