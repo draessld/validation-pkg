@@ -329,30 +329,6 @@ settings = ReadValidator.Settings(threads=8)
 # - 1 file  → 1 worker  × 8 compression threads
 ```
 
-### How Thread Splitting Works
-
-The package uses `calculate_thread_distribution()` to split threads intelligently:
-
-```python
-from validation_pkg.utils.file_handler import calculate_thread_distribution
-
-# 8 total threads, 4 files
-max_workers, comp_threads = calculate_thread_distribution(
-    total_threads=8,
-    num_files=4
-)
-# Result: max_workers=4, compression_threads=2
-# Runs 4 files in parallel, each using 2 compression threads
-```
-
-**Splitting strategy:**
-1. **Many files** (>=threads): Focus on file parallelization
-   - 16 files, 8 threads → 8 workers × 1 compression thread
-2. **Few files** (<threads): Focus on compression parallelization
-   - 2 files, 8 threads → 2 workers × 4 compression threads
-3. **Balanced** (moderate files): Split evenly
-   - 4 files, 8 threads → 4 workers × 2 compression threads
-
 ### Manual Thread Control
 
 For advanced users, you can control threads separately:

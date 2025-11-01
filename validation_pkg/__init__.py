@@ -137,6 +137,9 @@ def validate_genome(
     """
     validator = GenomeValidator(genome_config, settings)
     validator.run()
+    logger = get_logger()
+    if logger.report_file is not None:
+        logger.generate_report()
 
 def validate_read(
     read_config,
@@ -153,6 +156,9 @@ def validate_read(
     """
     validator = ReadValidator(read_config, settings)
     validator.run()
+    logger = get_logger()
+    if logger.report_file is not None:
+        logger.generate_report()
 
 def validate_reads(
     read_configs: List,
@@ -243,6 +249,9 @@ def validate_feature(
 
     validator = FeatureValidator(feature_config, settings)
     validator.run()
+    logger = get_logger()
+    if logger.report_file is not None:
+        logger.generate_report()
 
 def validate_features(
     feature_configs: List,

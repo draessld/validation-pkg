@@ -1159,7 +1159,7 @@ class TestSecurityCommandInjection:
 
 
 class TestParallelValidationLogging:
-    """Test that parallel validation correctly enables/disables process_id and thread_id logging."""
+    """Test that parallel validation correctly enables/disables process_id logging."""
 
     @pytest.fixture
     def temp_dir(self):
@@ -1216,11 +1216,9 @@ class TestParallelValidationLogging:
         # Verify parallel logging is still disabled
         assert not logger.is_parallel_logging_enabled()
 
-        # Check log file - should NOT have process_id/thread_id
+        # Check log file - should NOT have process_id
         log_content = log_file.read_text()
         assert '"process_id"' not in log_content
-        assert '"thread_id"' not in log_content
-
     def test_parallel_validation_enables_parallel_logging(self, temp_dir, output_dir):
         """Test that parallel validation (threads>1) enables parallel logging."""
         from validation_pkg.logger import setup_logging, get_logger
@@ -1254,11 +1252,9 @@ class TestParallelValidationLogging:
         # Verify parallel logging is disabled after validation (cleanup)
         assert not logger.is_parallel_logging_enabled()
 
-        # Check log file - SHOULD have process_id/thread_id during parallel section
+        # Check log file - SHOULD have process_id during parallel section
         log_content = log_file.read_text()
         assert '"process_id"' in log_content
-        assert '"thread_id"' in log_content
-
     def test_trust_mode_no_parallel_logging(self, temp_dir, output_dir):
         """Test that trust mode never enables parallel logging (always sequential)."""
         from validation_pkg.logger import setup_logging, get_logger
@@ -1292,11 +1288,9 @@ class TestParallelValidationLogging:
         # Verify parallel logging is still disabled
         assert not logger.is_parallel_logging_enabled()
 
-        # Check log file - should NOT have process_id/thread_id
+        # Check log file - should NOT have process_id
         log_content = log_file.read_text()
         assert '"process_id"' not in log_content
-        assert '"thread_id"' not in log_content
-
     def test_parallel_logging_cleanup_on_error(self, temp_dir, output_dir):
         """Test that parallel logging is disabled even if validation fails."""
         from validation_pkg.logger import setup_logging, get_logger
@@ -1383,8 +1377,6 @@ class TestParallelValidationLogging:
 
         # Should have parallel validation messages
         assert '"process_id"' in log_content
-        assert '"thread_id"' in log_content
-
         # Should mention parallel validation
         assert 'parallel_mode' in log_content.lower() or 'parallel validation' in log_content.lower()
 

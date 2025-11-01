@@ -35,6 +35,7 @@ from validation_pkg.exceptions import (
 # Only these fields can be specified in config.json "options" section
 # These are the only settings that make sense to apply globally to all files
 ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level'}
+MAX_RECOMMENDED_THREADS = 16
 
 @dataclass
 class GenomeConfig:
@@ -167,20 +168,6 @@ class Config:
             None
         """
         return self.options.get('threads')
-    
-    def resolve_path(self, relative_path: str) -> Path:
-        """
-        Resolve a path relative to config directory.
-        
-        Args:
-            relative_path: Path relative to config file
-            
-        Returns:
-            Absolute Path object
-        """
-        if self.config_dir is None:
-            return Path(relative_path)
-        return self.config_dir / relative_path
     
     def __repr__(self):
         return (
@@ -335,7 +322,7 @@ class ConfigManager:
         filename, extra = ConfigManager._parse_config_file_value(value, field_name)
 
         # Extract file-level global options (threads, validation_level only)
-        filelvl_options = ConfigManager._merge_options(field_name,global_options,extra)
+        filelvl_options = ConfigManager._merge_options(field_name, global_options, extra)
 
         # Resolve absolute path with security validation
         filepath = ConfigManager._resolve_filepath(config_dir, filename)
@@ -583,10 +570,10 @@ class ConfigManager:
                 if threads <= 0:
                     raise ConfigurationError(f"'threads' must be a positive integer, got {threads}")
 
-                # Warn if excessive (diminishing returns beyond 16)
-                if threads > 16:
+                # Warn if excessive (diminishing returns beyond MAX_RECOMMENDED_THREADS)
+                if threads > MAX_RECOMMENDED_THREADS:
                     logger.warning(
-                        f"Thread count {threads} is high - diminishing returns beyond 16 threads. "
+                        f"Thread count {threads} is high - diminishing returns beyond {MAX_RECOMMENDED_THREADS} threads. "
                         f"Consider using 4-8 threads for optimal performance."
                     )
 
@@ -622,7 +609,7 @@ class ConfigManager:
             logger.debug("validation_level not specified in global options")
 
     @staticmethod
-    def _merge_options(field_name,global_options,extra) -> Dict:
+    def _merge_options(field_name: str, global_options: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:        
         logger = get_logger()
 
         # Extract file-level global options (threads, validation_level only)

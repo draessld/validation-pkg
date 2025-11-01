@@ -56,22 +56,18 @@ def add_log_level_colors(_, level: str, event_dict: dict) -> dict:
 
 def add_process_info(logger, method_name, event_dict: dict) -> dict:
     """
-    Add process ID and thread ID to log entries (only when parallel validation is active).
+    Add process ID to log entries (only when parallel validation is active).
 
     This processor conditionally adds:
-    - process_id: The OS process ID (PID)
-    - thread_id: The thread ID within the process
+    - process_id: The OS process ID (PID) of the coordinating process
 
-    These fields only appear during parallel validation to avoid cluttering
-    logs during normal sequential processing.
+    This field only appears during parallel validation to identify the main
+    coordinating process. Worker processes don't log directly - they return
+    results to the main process.
     """
-    # Only add process/thread info during parallel validation
+    # Only add process info during parallel validation
     if _parallel_validation_active.get(False):
         event_dict["process_id"] = os.getpid()
-
-        # Get thread ID (native thread identifier)
-        import threading
-        event_dict["thread_id"] = threading.get_native_id()
 
     return event_dict
 
@@ -442,56 +438,18 @@ class ValidationLogger:
         with self._issues_lock:
             self.validation_issues.clear()
 
-    def bind_worker_context(self, worker_id: int = None, file_context: str = None):
-        """
-        Bind worker ID and file context to logger for parallel processing.
-
-        This adds context that will appear in all subsequent log messages
-        from this worker, making it easy to identify which worker processed
-        which file.
-
-        Args:
-            worker_id: Worker number (1, 2, 3, etc.) for identification
-            file_context: Filename or description of what this worker is processing
-
-        Example:
-            >>> logger = get_logger()
-            >>> logger.bind_worker_context(worker_id=1, file_context="sample_1.fastq")
-            >>> logger.info("Starting validation")
-            # Output: [Worker-1 PID:12345 sample_1.fastq] Starting validation
-        """
-        if self.logger:
-            bind_kwargs = {}
-            if worker_id is not None:
-                bind_kwargs['worker_id'] = worker_id
-            if file_context is not None:
-                bind_kwargs['file_context'] = file_context
-
-            if bind_kwargs:
-                self.logger = self.logger.bind(**bind_kwargs)
-
-    def unbind_worker_context(self):
-        """
-        Remove worker context from logger.
-
-        This resets the logger to not include worker/file context in messages.
-        Useful when returning to the main process after parallel execution.
-        """
-        if self.logger:
-            # Unbind by re-getting the logger
-            self.logger = structlog.get_logger("bioinformatics_validator")
-
     def enable_parallel_logging(self):
         """
         Enable parallel validation logging mode.
 
-        When enabled, process_id and thread_id will be added to all log entries.
-        This should be called before starting parallel validation.
+        When enabled, process_id will be added to all log entries from the
+        coordinating process. This helps identify which process is managing
+        the parallel validation work.
 
         Example:
             >>> logger = get_logger()
             >>> logger.enable_parallel_logging()
-            >>> # Now process_id and thread_id appear in logs
+            >>> # Now process_id appears in logs
             >>> logger.info("Starting parallel validation")
         """
         _parallel_validation_active.set(True)
@@ -500,13 +458,13 @@ class ValidationLogger:
         """
         Disable parallel validation logging mode.
 
-        When disabled, process_id and thread_id will NOT be added to log entries.
+        When disabled, process_id will NOT be added to log entries.
         This should be called after parallel validation completes.
 
         Example:
             >>> logger = get_logger()
             >>> logger.disable_parallel_logging()
-            >>> # Now process_id and thread_id are hidden from logs
+            >>> # Now process_id is hidden from logs
             >>> logger.info("Parallel validation complete")
         """
         _parallel_validation_active.set(False)
@@ -574,43 +532,3 @@ def setup_logging(
     logger = get_logger()
     logger.setup(console_level, log_file, report_file)
     return logger
-
-
-# Example usage
-if __name__ == "__main__":
-    # Example 1: Simple setup
-    logger = setup_logging(console_level="INFO")
-
-    logger.info("Starting validation...")
-    logger.debug("This is a debug message (won't show in console)")
-    logger.warning("This is a warning")
-    logger.error("This is an error")
-
-    # Example 2: With files
-    logger = setup_logging(
-        console_level="INFO",
-        log_file=Path("logs/validation.log"),
-        report_file=Path("logs/report.txt")
-    )
-
-    logger.info("Processing genome file...")
-    logger.add_validation_issue(
-        level='ERROR',
-        category='genome',
-        message='Invalid FASTA format',
-        details={'file': 'ref.fasta', 'line': 42, 'reason': 'Unexpected character'}
-    )
-
-    logger.add_validation_issue(
-        level='WARNING',
-        category='feature',
-        message='Feature outside genome bounds',
-        details={'feature_id': 'gene1', 'position': 5000, 'genome_length': 4500}
-    )
-
-    # Generate report
-    logger.generate_report()
-
-    # Get summary
-    summary = logger.get_summary()
-    print(f"\nValidation complete: {summary}")

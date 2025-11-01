@@ -18,10 +18,6 @@ from pathlib import Path
 
 from validation_pkg.utils.file_handler import (
     open_file_with_coding_type,
-    open_file,
-    detect_compression,
-    get_base_filename,
-    get_file_format,
     gz_to_bz2,
     bz2_to_gz,
     none_to_gz,
@@ -29,8 +25,6 @@ from validation_pkg.utils.file_handler import (
     bz2_to_none,
     none_to_bz2,
     check_compression_tool_available,
-    get_optimal_thread_count,
-    get_threads_for_compression,
     get_compression_command,
     open_compressed_writer,
 )
@@ -152,200 +146,6 @@ class TestOpenFileWithCodingType:
         assert content == sample_content.encode()
 
 
-class TestOpenFile:
-    """Tests for open_file function (automatic compression detection)."""
-
-    def test_open_plain_file(self, plain_file, sample_content):
-        """Test opening plain file."""
-        with open_file(plain_file) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_open_gzip_file(self, gzip_file, sample_content):
-        """Test opening gzip file with automatic detection."""
-        with open_file(gzip_file) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_open_bz2_file(self, bz2_file, sample_content):
-        """Test opening bzip2 file with automatic detection."""
-        with open_file(bz2_file) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_open_file_with_string_path(self, plain_file, sample_content):
-        """Test that function accepts string paths."""
-        with open_file(str(plain_file)) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_open_file_with_path_object(self, plain_file, sample_content):
-        """Test that function accepts Path objects."""
-        with open_file(plain_file) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_open_nonexistent_file_raises_error(self, temp_dir):
-        """Test that opening non-existent file raises error."""
-        nonexistent = temp_dir / "nonexistent.fasta"
-        with pytest.raises(FileNotFoundError):
-            with open_file(nonexistent) as f:
-                f.read()
-
-    def test_binary_mode(self, plain_file, sample_content):
-        """Test opening file in binary mode."""
-        with open_file(plain_file, mode='rb') as f:
-            content = f.read()
-            assert isinstance(content, bytes)
-
-
-class TestDetectCompression:
-    """Tests for detect_compression function."""
-
-    def test_detect_gzip_compression(self):
-        """Test detection of gzip compression."""
-        assert detect_compression("file.fasta.gz") == "gz"
-        assert detect_compression("file.gz") == "gz"
-        assert detect_compression(Path("path/to/file.gz")) == "gz"
-
-    def test_detect_bzip2_compression(self):
-        """Test detection of bzip2 compression."""
-        assert detect_compression("file.fasta.bz2") == "bz2"
-        assert detect_compression("file.bz2") == "bz2"
-        assert detect_compression(Path("path/to/file.bz2")) == "bz2"
-
-    def test_detect_no_compression(self):
-        """Test detection of no compression."""
-        assert detect_compression("file.fasta") == "none"
-        assert detect_compression("file.txt") == "none"
-        assert detect_compression("file") == "none"
-        assert detect_compression(Path("path/to/file.fasta")) == "none"
-
-    def test_case_insensitive_detection(self):
-        """Test that detection is case-insensitive."""
-        assert detect_compression("file.GZ") == "gz"
-        assert detect_compression("file.BZ2") == "bz2"
-        assert detect_compression("file.Gz") == "gz"
-
-    def test_accepts_string_path(self):
-        """Test that function accepts string paths."""
-        result = detect_compression("file.fasta.gz")
-        assert result == "gz"
-
-    def test_accepts_path_object(self):
-        """Test that function accepts Path objects."""
-        result = detect_compression(Path("file.fasta.gz"))
-        assert result == "gz"
-
-
-class TestGetBaseFilename:
-    """Tests for get_base_filename function."""
-
-    def test_get_base_from_gzip(self):
-        """Test getting base filename from gzip file."""
-        assert get_base_filename("genome.fasta.gz") == "genome.fasta"
-        assert get_base_filename("reads.fastq.gz") == "reads.fastq"
-        assert get_base_filename("file.gz") == "file"
-
-    def test_get_base_from_bzip2(self):
-        """Test getting base filename from bzip2 file."""
-        assert get_base_filename("genome.fasta.bz2") == "genome.fasta"
-        assert get_base_filename("reads.fastq.bz2") == "reads.fastq"
-        assert get_base_filename("file.bz2") == "file"
-
-    def test_get_base_from_plain(self):
-        """Test getting base filename from plain file."""
-        assert get_base_filename("genome.fasta") == "genome.fasta"
-        assert get_base_filename("reads.fastq") == "reads.fastq"
-        assert get_base_filename("file.txt") == "file.txt"
-
-    def test_accepts_string_path(self):
-        """Test that function accepts string paths."""
-        result = get_base_filename("genome.fasta.gz")
-        assert result == "genome.fasta"
-
-    def test_accepts_path_object(self):
-        """Test that function accepts Path objects."""
-        result = get_base_filename(Path("genome.fasta.gz"))
-        assert result == "genome.fasta"
-
-    def test_with_directory_path(self):
-        """Test with full directory path."""
-        assert get_base_filename("/path/to/genome.fasta.gz") == "genome.fasta"
-        assert get_base_filename(Path("/path/to/reads.fastq.bz2")) == "reads.fastq"
-
-
-class TestGetFileFormat:
-    """Tests for get_file_format function."""
-
-    def test_detect_fasta_format(self):
-        """Test detection of FASTA format."""
-        assert get_file_format("genome.fasta") == "fasta"
-        assert get_file_format("genome.fa") == "fasta"
-        assert get_file_format("genome.fna") == "fasta"
-        assert get_file_format("genome.fasta.gz") == "fasta"
-        assert get_file_format("genome.fa.bz2") == "fasta"
-
-    def test_detect_genbank_format(self):
-        """Test detection of GenBank format."""
-        assert get_file_format("genome.gb") == "genbank"
-        assert get_file_format("genome.gbk") == "genbank"
-        assert get_file_format("genome.genbank") == "genbank"
-        assert get_file_format("genome.gb.gz") == "genbank"
-        assert get_file_format("genome.gbk.bz2") == "genbank"
-
-    def test_detect_bed_format(self):
-        """Test detection of BED format."""
-        assert get_file_format("features.bed") == "bed"
-        assert get_file_format("features.bed.gz") == "bed"
-        assert get_file_format("features.bed.bz2") == "bed"
-
-    def test_detect_gff_format(self):
-        """Test detection of GFF format."""
-        assert get_file_format("features.gff") == "gff"
-        assert get_file_format("features.gff3") == "gff"
-        assert get_file_format("features.gff.gz") == "gff"
-
-    def test_detect_gtf_format(self):
-        """Test detection of GTF format."""
-        assert get_file_format("features.gtf") == "gtf"
-        assert get_file_format("features.gtf.gz") == "gtf"
-
-    def test_detect_fastq_format(self):
-        """Test detection of FASTQ format."""
-        assert get_file_format("reads.fastq") == "fastq"
-        assert get_file_format("reads.fq") == "fastq"
-        assert get_file_format("reads.fastq.gz") == "fastq"
-        assert get_file_format("reads.fq.bz2") == "fastq"
-
-    def test_unknown_format(self):
-        """Test detection of unknown format."""
-        assert get_file_format("file.txt") == "unknown"
-        assert get_file_format("file.xyz") == "unknown"
-        assert get_file_format("file") == "unknown"
-
-    def test_case_insensitive_detection(self):
-        """Test that format detection is case-insensitive."""
-        assert get_file_format("genome.FASTA") == "fasta"
-        assert get_file_format("genome.Fasta.GZ") == "fasta"
-        assert get_file_format("reads.FASTQ") == "fastq"
-
-    def test_accepts_string_path(self):
-        """Test that function accepts string paths."""
-        result = get_file_format("genome.fasta.gz")
-        assert result == "fasta"
-
-    def test_accepts_path_object(self):
-        """Test that function accepts Path objects."""
-        result = get_file_format(Path("genome.fasta.gz"))
-        assert result == "fasta"
-
-    def test_with_directory_path(self):
-        """Test with full directory path."""
-        assert get_file_format("/path/to/genome.fasta.gz") == "fasta"
-        assert get_file_format(Path("/path/to/reads.fastq.bz2")) == "fastq"
-
-
 class TestCompressionConversion:
     """Tests for compression conversion functions."""
 
@@ -440,67 +240,6 @@ class TestCompressionConversion:
         assert final.read_text() == sample_content
 
 
-class TestIntegration:
-    """Integration tests combining multiple functions."""
-
-    def test_detect_and_open_file(self, gzip_file, sample_content):
-        """Test detecting compression and opening file accordingly."""
-        compression = detect_compression(gzip_file)
-        assert compression == "gz"
-
-        with open_file(gzip_file) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_get_format_and_base_filename(self):
-        """Test getting both format and base filename."""
-        filepath = "genome.fasta.gz"
-
-        base = get_base_filename(filepath)
-        assert base == "genome.fasta"
-
-        format_type = get_file_format(filepath)
-        assert format_type == "fasta"
-
-    def test_workflow_with_coding_type(self, gzip_file, sample_content):
-        """Test complete workflow using CodingType enum."""
-        # Detect compression
-        compression = detect_compression(gzip_file)
-
-        # Convert to CodingType
-        coding_type = CodingType(compression)
-        assert coding_type == CodingType.GZIP
-
-        # Open file
-        with open_file_with_coding_type(gzip_file, coding_type) as f:
-            content = f.read()
-        assert content == sample_content
-
-    def test_format_detection_with_double_extension(self):
-        """Test format detection works with double extensions."""
-        test_cases = [
-            ("genome.fasta.gz", "fasta"),
-            ("reads.fastq.bz2", "fastq"),
-            ("features.bed.gz", "bed"),
-            ("genes.gff.bz2", "gff"),
-        ]
-
-        for filepath, expected_format in test_cases:
-            assert get_file_format(filepath) == expected_format
-
-    def test_base_filename_extraction_chain(self):
-        """Test extracting base filename from various formats."""
-        test_cases = [
-            ("/path/to/genome.fasta.gz", "genome.fasta"),
-            ("/path/to/reads.fastq.bz2", "reads.fastq"),
-            ("features.bed", "features.bed"),
-            ("./relative/path/genes.gff3.gz", "genes.gff3"),
-        ]
-
-        for filepath, expected_base in test_cases:
-            assert get_base_filename(filepath) == expected_base
-
-
 class TestParallelCompressionTools:
     """Tests for parallel compression tool utilities."""
 
@@ -523,12 +262,6 @@ class TestParallelCompressionTools:
         # Second call should use cache
         result2 = check_compression_tool_available('gzip')
         assert result1 == result2
-
-    def test_get_optimal_thread_count(self):
-        """Test that optimal thread count is returned and capped."""
-        threads = get_optimal_thread_count()
-        assert isinstance(threads, int)
-        assert 1 <= threads <= 8
 
     def test_get_compression_command_gzip(self):
         """Test getting gzip compression command."""
@@ -660,72 +393,6 @@ class TestOpenCompressedWriter:
         # File should be fully written and closed
         assert output_file.exists()
         # Should be able to read immediately
-        with gzip.open(output_file, 'rt') as f:
-            assert f.read() == sample_content
-
-
-class TestThreadsConfiguration:
-    """Tests for thread configuration functionality."""
-
-    def test_get_threads_for_compression_with_config_value(self):
-        """Test get_threads_for_compression with user-specified value."""
-        result = get_threads_for_compression(4)
-        assert result == 4
-
-    def test_get_threads_for_compression_with_none(self):
-        """Test get_threads_for_compression with None (auto-detect)."""
-        result = get_threads_for_compression(None)
-        assert isinstance(result, int)
-        assert 1 <= result <= 8
-
-    def test_get_threads_for_compression_with_one(self):
-        """Test get_threads_for_compression with single thread."""
-        result = get_threads_for_compression(1)
-        assert result == 1
-
-    def test_get_threads_for_compression_with_many(self):
-        """Test get_threads_for_compression with many threads."""
-        result = get_threads_for_compression(16)
-        assert result == 16
-
-    def test_get_compression_command_with_custom_threads(self):
-        """Test get_compression_command respects custom thread count."""
-        cmd, args = get_compression_command(CodingType.GZIP, 'compress', threads=2)
-
-        assert cmd in ('pigz', 'gzip')
-        if cmd == 'pigz':
-            # pigz should include thread argument
-            assert '2' in args or '-p' in args
-
-    def test_compression_conversion_with_threads(self, temp_dir, sample_content):
-        """Test compression conversion functions accept threads parameter."""
-        plain_file = temp_dir / "test.txt"
-        gz_file = temp_dir / "test.txt.gz"
-        bz2_file = temp_dir / "test.txt.bz2"
-
-        plain_file.write_text(sample_content)
-
-        # Test none_to_gz with threads
-        none_to_gz(plain_file, gz_file, threads=2)
-        assert gz_file.exists()
-        with gzip.open(gz_file, 'rt') as f:
-            assert f.read() == sample_content
-
-        # Test gz_to_bz2 with threads
-        gz_to_bz2(gz_file, bz2_file, threads=2)
-        assert bz2_file.exists()
-        with bz2.open(bz2_file, 'rt') as f:
-            assert f.read() == sample_content
-
-    def test_open_compressed_writer_with_threads(self, temp_dir, sample_content):
-        """Test open_compressed_writer with custom threads."""
-        output_file = temp_dir / "output.txt.gz"
-
-        with open_compressed_writer(output_file, CodingType.GZIP, threads=2) as f:
-            f.write(sample_content)
-
-        # Verify file was written correctly
-        assert output_file.exists()
         with gzip.open(output_file, 'rt') as f:
             assert f.read() == sample_content
 

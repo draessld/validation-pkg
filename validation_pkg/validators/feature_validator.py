@@ -27,7 +27,7 @@ from dataclasses import dataclass
 import shutil
 
 from validation_pkg.logger import get_logger
-from validation_pkg.utils.settings import BaseSettings, UNSET, _UnsetType
+from validation_pkg.utils.settings import BaseSettings
 from validation_pkg.exceptions import (
     FeatureValidationError,
     FileFormatError,
@@ -157,8 +157,7 @@ class FeatureValidator:
             feature_config: FeatureConfig object from ConfigManager with file info
             settings: Settings object with validation parameters.
                 If None, uses options from feature_config.options (threads, validation_level),
-                otherwise uses defaults. If provided, only non-UNSET user values override
-                config/defaults (smart merge).
+                otherwise uses defaults.
         """
         self.logger = get_logger()
        

@@ -17,27 +17,6 @@ from copy import deepcopy
 from typing import Dict, Any
 from abc import ABC
 
-# ===== Sentinel Value for Unspecified Settings =====
-class _UnsetType:
-    """
-    Sentinel type to distinguish 'not specified' from None.
-
-    Used for smart merging of settings - when a setting is UNSET,
-    it won't override lower-priority values during merge.
-
-    Example:
-        threads: Optional[int] = UNSET  # Not specified by user
-        threads: Optional[int] = None   # Explicitly set to None by user
-    """
-    def __repr__(self):
-        return '<UNSET>'
-
-    def __bool__(self):
-        return False
-
-# Singleton instance
-UNSET = _UnsetType()
-
 # ===== Base Settings Class =====
 class BaseSettings(ABC):
     """

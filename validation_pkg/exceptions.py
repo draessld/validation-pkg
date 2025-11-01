@@ -203,28 +203,3 @@ class InterFileValidationError(ValidationError):
     - Reads map to sequences not in genome
     """
     pass
-
-
-# Example usage
-if __name__ == "__main__":
-    # Example 1: Configuration error
-    try:
-        raise ConfigurationError("Missing required field: ref_genome_filename")
-    except ValidationError as e:
-        print(f"Caught ValidationError: {e}")
-    
-    # Example 2: File format error
-    try:
-        raise FastaFormatError("Invalid FASTA format at line 42: expected '>' but found 'A'")
-    except FileFormatError as e:
-        print(f"Caught FileFormatError: {e}")
-    
-    # Example 3: Inter-file validation error
-    try:
-        raise InterFileValidationError(
-            "Feature 'gene1' at position 5000 exceeds genome length of 4500"
-        )
-    except ValidationError as e:
-        print(f"Caught ValidationError: {e}")
-    
-    print("\n✓ All exception types working correctly")

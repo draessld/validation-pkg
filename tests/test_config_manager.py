@@ -6,7 +6,7 @@ import pytest
 import json
 import tempfile
 from pathlib import Path
-from validation_pkg.config_manager import ConfigManager, Config, GenomeConfig, ReadConfig, FeatureConfig
+from validation_pkg.config_manager import ConfigManager, Config
 from validation_pkg.exceptions import ConfigurationError, FileNotFoundError as ValidationFileNotFoundError
 from validation_pkg.utils.formats import ReadFormat,FeatureFormat,GenomeFormat,CodingType
 

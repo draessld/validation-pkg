@@ -372,8 +372,8 @@ class TestParallelValidationLogging:
             assert "sequential" in output.lower() or "Trust mode" in output
 
 
-class TestConditionalProcessThreadID:
-    """Test that process_id and thread_id only appear during parallel validation."""
+class TestConditionalProcessID:
+    """Test that process_id only appears during parallel validation."""
 
     @pytest.fixture(autouse=True)
     def reset_logger(self):
@@ -403,7 +403,7 @@ class TestConditionalProcessThreadID:
         assert not logger.is_parallel_logging_enabled()
 
     def test_sequential_validation_no_process_id_in_logs(self, tmp_path):
-        """Test that sequential validation does NOT include process_id/thread_id in logs"""
+        """Test that sequential validation does NOT include process_id in logs"""
         from validation_pkg.validators.read_validator import ReadValidator
         from validation_pkg.config_manager import ReadConfig
         from validation_pkg.utils.formats import CodingType, ReadFormat
@@ -437,15 +437,13 @@ class TestConditionalProcessThreadID:
         validator._parse_file()
         validator._validate_sequences()
 
-        # Check log file - should NOT contain process_id or thread_id
+        # Check log file - should NOT contain process_id
         log_content = log_file.read_text()
 
         # Log file uses JSON format, so check for the keys
         assert '"process_id"' not in log_content or log_content.count('"process_id"') == 0
-        assert '"thread_id"' not in log_content or log_content.count('"thread_id"') == 0
-
     def test_parallel_validation_has_process_id_in_logs(self, tmp_path):
-        """Test that parallel validation DOES include process_id/thread_id in logs"""
+        """Test that parallel validation DOES include process_id in logs"""
         from validation_pkg.validators.read_validator import ReadValidator
         from validation_pkg.config_manager import ReadConfig
         from validation_pkg.utils.formats import CodingType, ReadFormat
@@ -479,13 +477,11 @@ class TestConditionalProcessThreadID:
         validator._parse_file()
         validator._validate_sequences()
 
-        # Check log file - SHOULD contain process_id and thread_id during parallel section
+        # Check log file - SHOULD contain process_id during parallel section
         log_content = log_file.read_text()
 
         # Log file uses JSON format, so check for the keys
         assert '"process_id"' in log_content
-        assert '"thread_id"' in log_content
-
     def test_parallel_logging_cleanup_after_validation(self, tmp_path):
         """Test that parallel logging is properly disabled after validation completes"""
         from validation_pkg.validators.read_validator import ReadValidator
@@ -527,10 +523,10 @@ class TestConditionalProcessThreadID:
 
         # Log something after validation
         logger.info("Post-validation log")
-        # This message should NOT have process_id/thread_id
+        # This message should NOT have process_id
 
     def test_trust_mode_no_process_id_in_logs(self, tmp_path):
-        """Test that trust mode (always sequential) does NOT include process_id/thread_id"""
+        """Test that trust mode (always sequential) does NOT include process_id"""
         from validation_pkg.validators.read_validator import ReadValidator
         from validation_pkg.config_manager import ReadConfig
         from validation_pkg.utils.formats import CodingType, ReadFormat
@@ -564,13 +560,11 @@ class TestConditionalProcessThreadID:
         validator._parse_file()
         validator._validate_sequences()
 
-        # Check log file - should NOT contain process_id or thread_id
+        # Check log file - should NOT contain process_id
         log_content = log_file.read_text()
 
-        # Trust mode is sequential, so no process_id/thread_id
+        # Trust mode is sequential, so no process_id
         assert '"process_id"' not in log_content or log_content.count('"process_id"') == 0
-        assert '"thread_id"' not in log_content or log_content.count('"thread_id"') == 0
-
     def test_full_integration_sequential_vs_parallel(self, tmp_path):
         """Integration test: Compare sequential vs parallel logging in the same test"""
         from validation_pkg.validators.read_validator import ReadValidator
@@ -627,14 +621,10 @@ class TestConditionalProcessThreadID:
         seq_log = log_file_seq.read_text()
         par_log = log_file_par.read_text()
 
-        # Sequential should NOT have process_id/thread_id
+        # Sequential should NOT have process_id
         assert '"process_id"' not in seq_log or seq_log.count('"process_id"') == 0
-        assert '"thread_id"' not in seq_log or seq_log.count('"thread_id"') == 0
-
-        # Parallel SHOULD have process_id/thread_id
+        # Parallel SHOULD have process_id
         assert '"process_id"' in par_log
-        assert '"thread_id"' in par_log
-
         # Verify parallel logging was cleaned up
         assert not logger.is_parallel_logging_enabled()
 

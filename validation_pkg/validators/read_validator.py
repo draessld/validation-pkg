@@ -30,7 +30,7 @@ from multiprocessing import Pool
 from functools import partial
 
 from validation_pkg.logger import get_logger
-from validation_pkg.utils.settings import BaseSettings, UNSET, _UnsetType
+from validation_pkg.utils.settings import BaseSettings
 from validation_pkg.exceptions import (
     ReadValidationError,
     FileFormatError,
@@ -171,8 +171,7 @@ class ReadValidator:
             read_config: ReadConfig object from ConfigManager with file info
             settings: Settings object with validation parameters.
                 If None, uses options from read_config.options (threads, validation_level),
-                otherwise uses defaults. If provided, only non-UNSET user values override
-                config/defaults (smart merge).
+                otherwise uses defaults.
         """
         self.logger = get_logger()
 

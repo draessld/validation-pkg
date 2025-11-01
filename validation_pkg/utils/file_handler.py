@@ -12,13 +12,12 @@ Provides unified utilities for:
 import gzip
 import bz2
 from pathlib import Path
-from typing import Union, TextIO, Optional
+from typing import Union, TextIO
 
-from validation_pkg.utils.formats import CodingType, GenomeFormat, ReadFormat, FeatureFormat
+from validation_pkg.utils.formats import CodingType
 from validation_pkg.exceptions import CompressionError
 
 import subprocess
-import os
 import shutil
 
 
@@ -53,128 +52,6 @@ def check_compression_tool_available(tool_name: str) -> bool:
     return available
 
 
-def get_optimal_thread_count() -> int:
-    """
-    Get optimal thread count for parallel compression.
-
-    Auto-detects CPU cores and caps at 8 threads for balanced performance.
-    More than 8 threads shows diminishing returns for compression.
-
-    Returns:
-        Number of threads to use (1-8)
-
-    Example:
-        >>> threads = get_optimal_thread_count()
-        >>> print(f"Using {threads} threads for compression")
-    """
-    try:
-        cpu_count = os.cpu_count() or 1
-        # Cap at 8 threads - diminishing returns beyond this for compression
-        return min(cpu_count, 8)
-    except:
-        return 4  # Safe default
-
-
-def get_threads_for_compression(config_threads: Optional[int]) -> int:
-    """
-    Get thread count for compression, using config value or auto-detection.
-
-    This helper function centralizes the logic for determining thread count,
-    preferring user-specified values from config when available.
-
-    Args:
-        config_threads: Thread count from config.get_threads(), or None
-
-    Returns:
-        Thread count to use (always >= 1)
-
-    Example:
-        >>> # User specified 4 threads in config
-        >>> get_threads_for_compression(4)
-        4
-        >>> # No threads specified, auto-detect
-        >>> get_threads_for_compression(None)
-        8  # (or whatever get_optimal_thread_count() returns)
-    """
-    if config_threads is not None:
-        return config_threads
-    return get_optimal_thread_count()
-
-
-def calculate_thread_distribution(
-    total_threads: int,
-    num_files: int
-) -> tuple[int, int]:
-    """
-    Intelligently split threads between file parallelization and compression.
-
-    This function implements a smart strategy that adapts to the workload:
-    - Few files: Prioritize compression threads (vertical parallelism)
-    - Many files: Prioritize file workers (horizontal parallelism)
-    - Medium case: Balanced split
-
-    Args:
-        total_threads: Total number of threads/cores available
-        num_files: Number of files to process
-
-    Returns:
-        Tuple of (max_workers, compression_threads):
-            - max_workers: Number of files to process concurrently
-            - compression_threads: Threads per file for compression
-
-    Strategy:
-        - 1 file: All threads to compression (max_workers=1)
-        - 2-4 files with many threads: Balanced split
-        - Many files (>8): Prioritize file parallelization
-        - Always ensure compression_threads >= 1
-
-    Examples:
-        >>> # 1 file, 8 cores → focus on compression
-        >>> calculate_thread_distribution(8, 1)
-        (1, 8)
-
-        >>> # 4 files, 8 cores → balanced
-        >>> calculate_thread_distribution(8, 4)
-        (4, 2)
-
-        >>> # 20 files, 8 cores → focus on file parallelization
-        >>> calculate_thread_distribution(8, 20)
-        (8, 1)
-
-        >>> # 2 files, 16 cores → give each file good compression
-        >>> calculate_thread_distribution(16, 2)
-        (2, 8)
-    """
-    # Edge case: 1 file → all threads to compression
-    if num_files == 1:
-        return (1, total_threads)
-
-    # Edge case: more files than threads → 1 thread per file
-    if num_files >= total_threads:
-        return (total_threads, 1)
-
-    # Strategy: Try to balance file-level and compression-level parallelism
-    # General heuristic: sqrt(total_threads) for max_workers
-    # This gives good balance between parallelism types
-
-    import math
-
-    # For small numbers of files (2-4), use number of files as workers
-    if num_files <= 4:
-        max_workers = num_files
-        compression_threads = max(1, total_threads // num_files)
-        return (max_workers, compression_threads)
-
-    # For many files, use sqrt heuristic but cap at num_files
-    optimal_workers = min(int(math.sqrt(total_threads * num_files)), num_files)
-    max_workers = min(optimal_workers, total_threads)
-
-    # Distribute remaining threads to compression
-    compression_threads = max(1, total_threads // max_workers)
-
-    return (max_workers, compression_threads)
-
-
 def get_compression_command(coding_type: CodingType, mode: str = 'compress', threads: int = None) -> tuple:
     """
     Get the best available compression command for the given coding type.
@@ -185,7 +62,7 @@ def get_compression_command(coding_type: CodingType, mode: str = 'compress', thr
     Args:
         coding_type: CodingType enum (GZIP, BZIP2, or NONE)
         mode: 'compress' or 'decompress'
-        threads: Number of threads to use (None = auto-detect)
+        threads: Number of threads to use (None = use default of 1)
 
     Returns:
         Tuple of (command_name, [args]) for subprocess
@@ -197,8 +74,9 @@ def get_compression_command(coding_type: CodingType, mode: str = 'compress', thr
     """
     global _LOGGER_INITIALIZED
 
+    # Default to 1 thread if not specified
     if threads is None:
-        threads = get_optimal_thread_count()
+        threads = 1
 
     if coding_type == CodingType.GZIP:
         # Try pigz first (parallel gzip)
@@ -311,114 +189,6 @@ def open_file_with_coding_type(
             return open(filepath, mode)
     except Exception as e:
         raise CompressionError(f"Failed to open file {filepath}: {e}") from e
-
-
-def open_file(filepath: Union[str, Path], mode: str = 'rt') -> TextIO:
-    """
-    Open a file with automatic decompression.
-    
-    Supports:
-    - Plain files
-    - Gzip compressed files (.gz)
-    - Bzip2 compressed files (.bz2)
-    
-    Args:
-        filepath: Path to file
-        mode: Opening mode (default: 'rt' for text read)
-        
-    Returns:
-        File handle
-        
-    Example:
-        with open_file('genome.fasta.gz') as f:
-            content = f.read()
-    """
-    filepath = Path(filepath)
-    
-    if filepath.suffix == '.gz':
-        return gzip.open(filepath, mode)
-    elif filepath.suffix == '.bz2':
-        return bz2.open(filepath, mode)
-    else:
-        return open(filepath, mode)
-
-
-def detect_compression(filepath: Union[str, Path]) -> str:
-    """
-    Detect compression type from file extension.
-    
-    Args:
-        filepath: Path to file
-        
-    Returns:
-        'gz', 'bz2', or 'none'
-    """
-    filepath = Path(filepath)
-    suffix = filepath.suffix.lower()
-    
-    if suffix == '.gz':
-        return 'gz'
-    elif suffix == '.bz2':
-        return 'bz2'
-    else:
-        return 'none'
-
-
-def get_base_filename(filepath: Union[str, Path]) -> str:
-    """
-    Get base filename without compression extension.
-
-    Args:
-        filepath: Path to file
-
-    Returns:
-        Base filename
-
-    Example:
-        get_base_filename('genome.fasta.gz') -> 'genome.fasta'
-        get_base_filename('reads.fastq.bz2') -> 'reads.fastq'
-    """
-    filepath = Path(filepath)
-
-    # Remove compression extension if present (case-insensitive)
-    if filepath.suffix.lower() in ['.gz', '.bz2']:
-        return filepath.stem
-
-    return filepath.name
-
-
-def get_file_format(filepath: Union[str, Path]) -> str:
-    """
-    Detect file format from extension (ignoring compression).
-    
-    Args:
-        filepath: Path to file
-        
-    Returns:
-        File format: 'fasta', 'genbank', 'bed', 'gff', 'gtf', 'fastq', or 'unknown'
-    """
-    # Get filename without compression
-    base_name = get_base_filename(filepath)
-    base_path = Path(base_name)
-    ext = base_path.suffix.lower()
-    
-    # Map extensions to formats
-    format_map = {
-        '.fa': 'fasta',
-        '.fasta': 'fasta',
-        '.fna': 'fasta',
-        '.gb': 'genbank',
-        '.gbk': 'genbank',
-        '.genbank': 'genbank',
-        '.bed': 'bed',
-        '.gff': 'gff',
-        '.gff3': 'gff',
-        '.gtf': 'gtf',
-        '.fastq': 'fastq',
-        '.fq': 'fastq',
-    }
-    
-    return format_map.get(ext, 'unknown')
 
 
 def gz_to_bz2(gz_file: Path, bz2_file: Path, threads: int = None):
@@ -550,6 +320,7 @@ def bz2_to_gz(bz2_file: Path, gz_file: Path, threads: int = None):
     except Exception as e:
         raise CompressionError(f"Compression conversion failed: {e}") from e
 
+
 def none_to_gz(none_file: Path, gz_file: Path, threads: int = None):
     """
     Compress uncompressed file to gzip.
@@ -572,7 +343,7 @@ def none_to_gz(none_file: Path, gz_file: Path, threads: int = None):
 
     try:
         with open(none_file, 'rb') as input_file, open(gz_file, 'wb') as output_file:
-            result = subprocess.run(
+            subprocess.run(
                 [compress_cmd] + compress_args,
                 stdin=input_file,
                 stdout=output_file,
@@ -585,6 +356,7 @@ def none_to_gz(none_file: Path, gz_file: Path, threads: int = None):
         ) from e
     except (OSError, FileNotFoundError) as e:
         raise CompressionError(f"Compression tool not found: {e}") from e
+
 
 def gz_to_none(gz_file: Path, none_file: Path, threads: int = None):
     """
@@ -608,7 +380,7 @@ def gz_to_none(gz_file: Path, none_file: Path, threads: int = None):
 
     try:
         with open(none_file, 'wb') as output_file:
-            result = subprocess.run(
+            subprocess.run(
                 [decompress_cmd] + decompress_args + [str(gz_file)],
                 stdout=output_file,
                 stderr=subprocess.PIPE,
@@ -620,6 +392,7 @@ def gz_to_none(gz_file: Path, none_file: Path, threads: int = None):
         ) from e
     except (OSError, FileNotFoundError) as e:
         raise CompressionError(f"Compression tool not found: {e}") from e
+
 
 def bz2_to_none(bz2_file: Path, none_file: Path, threads: int = None):
     """
@@ -643,7 +416,7 @@ def bz2_to_none(bz2_file: Path, none_file: Path, threads: int = None):
 
     try:
         with open(none_file, 'wb') as output_file:
-            result = subprocess.run(
+            subprocess.run(
                 [decompress_cmd] + decompress_args + [str(bz2_file)],
                 stdout=output_file,
                 stderr=subprocess.PIPE,
@@ -655,6 +428,7 @@ def bz2_to_none(bz2_file: Path, none_file: Path, threads: int = None):
         ) from e
     except (OSError, FileNotFoundError) as e:
         raise CompressionError(f"Compression tool not found: {e}") from e
+
 
 def none_to_bz2(none_file: Path, bz2_file: Path, threads: int = None):
     """
@@ -678,7 +452,7 @@ def none_to_bz2(none_file: Path, bz2_file: Path, threads: int = None):
 
     try:
         with open(none_file, 'rb') as input_file, open(bz2_file, 'wb') as output_file:
-            result = subprocess.run(
+            subprocess.run(
                 [compress_cmd] + compress_args,
                 stdin=input_file,
                 stdout=output_file,
