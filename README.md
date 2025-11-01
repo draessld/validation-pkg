@@ -26,7 +26,7 @@ A comprehensive validation package for genomic data files used in bioinformatics
 
 ### Getting Started
 - **[Quick Start](#quick-start)** - Get up and running in 5 minutes
-- **[examples/README.md](examples/README.md)** - 13 runnable examples with explanations
+- **[examples/README.md](examples/README.md)** - runnable examples with explanations
 - **[examples/QUICK_REFERENCE.md](examples/QUICK_REFERENCE.md)** - Syntax cheat sheet
 
 ### Core Documentation
@@ -140,8 +140,7 @@ The package supports three validation levels to balance thoroughness and perform
 **Full validation - comprehensive**
 - Parses and validates every sequence
 - Applies all editing specifications
-- Complete statistics collection
-- **Use case:** Development, quality control, untrusted data sources
+- **Use case:** Development, untrusted data sources
 - **Performance:** Slowest, most thorough
 
 #### **Trust Mode** (`validation_level='trust'`)
@@ -155,7 +154,6 @@ For **Genome Files**:
 
 For **Read Files**:
 - Checks line count (FASTQ: divisible by 4)
-- Validates ONLY first record format
 - NO edits applied
 - Copies file as-is (byte-for-byte)
 
