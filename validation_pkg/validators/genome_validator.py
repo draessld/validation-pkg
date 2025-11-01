@@ -157,7 +157,6 @@ class GenomeValidator:
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
 
-    def __post_init__(self):
         if not self.validation_level:
             self.validation_level = 'strict'    #   default global value
 

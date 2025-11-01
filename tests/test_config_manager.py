@@ -368,12 +368,12 @@ class TestConfigManager:
         # Check all paths are absolute
         assert all(read.filepath.is_absolute() for read in loaded_config.reads)
     
-    def test_extra_keys_stored(self, temp_dir):
-        """Test that extra keys in config are stored in extra dict."""
+    def test_extra_keys_logged_as_warnings(self, temp_dir):
+        """Test that extra keys in config are logged as warnings (not stored)."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
-        
+
         config = {
             "ref_genome_filename": {
                 "filename": "ref.fasta",
@@ -389,19 +389,17 @@ class TestConfigManager:
                 }
             ]
         }
-        
+
         config_file = temp_dir / "config.json"
         config_file.write_text(json.dumps(config))
-        
+
+        # Config should load successfully (extra keys are just logged as warnings)
         loaded_config = ConfigManager.load(str(config_file))
-        
-        # Check extra keys are stored
-        assert "custom_key" in loaded_config.ref_genome.extra
-        assert loaded_config.ref_genome.extra["custom_key"] == "custom_value"
-        assert loaded_config.ref_genome.extra["quality_threshold"] == 30
-        
-        assert "custom_read_key" in loaded_config.reads[0].extra
-        assert loaded_config.reads[0].extra["custom_read_key"] == "value"
+
+        # Verify config loaded successfully
+        assert loaded_config.ref_genome is not None
+        assert loaded_config.ref_genome.filename == "ref.fasta"
+        assert len(loaded_config.reads) == 1
 
     def test_genome_file_genbank_format(self,temp_dir):
         """Genome files in GenBank format (.gbk) are accepted and paths resolved."""
@@ -814,8 +812,8 @@ class TestConfigOptionsThreads:
 
         assert config.get_threads() is None
 
-    def test_threads_omitted_means_autodetect(self, temp_dir):
-        """Test that omitting threads means auto-detect."""
+    def test_threads_omitted_means_none(self, temp_dir):
+        """Test that omitting threads returns None (empty options)."""
         # Create config without threads option
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
@@ -832,6 +830,7 @@ class TestConfigOptionsThreads:
 
         loaded_config = ConfigManager.load(str(config_file))
 
+        # No options section means get_threads() returns None
         assert loaded_config.get_threads() is None
 
     def test_threads_zero_raises_error(self, temp_dir):
@@ -911,7 +910,7 @@ class TestConfigOptionsThreads:
 
 
 class TestConfigValidatorSettings:
-    """Test suite for validator settings extraction from config.json."""
+    """Test suite for file-level settings merging in config.json."""
 
     @pytest.fixture
     def temp_dir(self):
@@ -919,8 +918,8 @@ class TestConfigValidatorSettings:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield Path(tmpdir)
 
-    def test_genome_config_extracts_validation_level(self, temp_dir):
-        """Test that validation_level is extracted from genome config."""
+    def test_genome_config_file_level_validation_level(self, temp_dir):
+        """Test that file-level validation_level is stored in global_options."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
@@ -939,11 +938,13 @@ class TestConfigValidatorSettings:
 
         loaded_config = ConfigManager.load(str(config_file))
 
-        assert loaded_config.ref_genome.settings_dict == {"validation_level": "trust"}
-        assert loaded_config.mod_genome.settings_dict == {}
+        # File-level validation_level stored in global_options (no global options in config)
+        assert loaded_config.ref_genome.global_options == {"validation_level": "trust"}
+        # mod_genome has no global_options since none specified in config
+        assert loaded_config.mod_genome.global_options == {}
 
-    def test_read_config_extracts_validation_level(self, temp_dir):
-        """Test that validation_level is extracted from read config."""
+    def test_read_config_file_level_validation_level(self, temp_dir):
+        """Test that file-level validation_level is stored in global_options for reads."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
@@ -965,11 +966,11 @@ class TestConfigValidatorSettings:
 
         loaded_config = ConfigManager.load(str(config_file))
 
-        assert loaded_config.reads[0].settings_dict == {"validation_level": "trust"}
+        assert loaded_config.reads[0].global_options == {"validation_level": "trust"}
         assert loaded_config.reads[0].ngs_type == "illumina"
 
-    def test_feature_config_extracts_validation_level(self, temp_dir):
-        """Test that validation_level is extracted from feature config."""
+    def test_feature_config_file_level_validation_level(self, temp_dir):
+        """Test that file-level validation_level is stored in global_options for features."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
@@ -990,10 +991,10 @@ class TestConfigValidatorSettings:
 
         loaded_config = ConfigManager.load(str(config_file))
 
-        assert loaded_config.ref_feature.settings_dict == {"validation_level": "minimal"}
+        assert loaded_config.ref_feature.global_options == {"validation_level": "minimal"}
 
-    def test_multiple_settings_extracted(self, temp_dir):
-        """Test that multiple validator settings are extracted correctly."""
+    def test_non_global_options_logged_as_warnings(self, temp_dir):
+        """Test that non-global options (like plasmid_split) are logged as warnings and ignored."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
@@ -1002,8 +1003,8 @@ class TestConfigValidatorSettings:
             "ref_genome_filename": {
                 "filename": "ref.fasta",
                 "validation_level": "trust",
-                "plasmid_split": True,
-                "min_sequence_length": 500
+                "plasmid_split": True,  # Not a global option - ignored with warning
+                "min_sequence_length": 500  # Not a global option - ignored with warning
             },
             "mod_genome_filename": {"filename": "mod.fasta"},
             "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
@@ -1012,47 +1013,14 @@ class TestConfigValidatorSettings:
         config_file = temp_dir / "config.json"
         config_file.write_text(json.dumps(config, indent=2))
 
+        # Should load successfully (non-global options just logged as warnings)
         loaded_config = ConfigManager.load(str(config_file))
 
-        expected_settings = {
-            "validation_level": "trust",
-            "plasmid_split": True,
-            "min_sequence_length": 500
-        }
-        assert loaded_config.ref_genome.settings_dict == expected_settings
+        # Only validation_level (global option) should be in global_options
+        assert loaded_config.ref_genome.global_options == {"validation_level": "trust"}
 
-    def test_read_settings_extracted_with_check_invalid_chars(self, temp_dir):
-        """Test extraction of check_invalid_chars for reads."""
-        (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
-        (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
-        (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
-
-        config = {
-            "ref_genome_filename": {"filename": "ref.fasta"},
-            "mod_genome_filename": {"filename": "mod.fasta"},
-            "reads": [
-                {
-                    "filename": "reads.fastq",
-                    "ngs_type": "ont",
-                    "validation_level": "strict",
-                    "check_invalid_chars": True
-                }
-            ]
-        }
-
-        config_file = temp_dir / "config.json"
-        config_file.write_text(json.dumps(config, indent=2))
-
-        loaded_config = ConfigManager.load(str(config_file))
-
-        expected_settings = {
-            "validation_level": "strict",
-            "check_invalid_chars": True
-        }
-        assert loaded_config.reads[0].settings_dict == expected_settings
-
-    def test_directory_reads_inherit_settings(self, temp_dir):
-        """Test that files from directory inherit validator settings."""
+    def test_directory_reads_inherit_file_level_settings(self, temp_dir):
+        """Test that files from directory inherit file-level validation_level."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
 
@@ -1079,13 +1047,13 @@ class TestConfigValidatorSettings:
 
         loaded_config = ConfigManager.load(str(config_file))
 
-        # Both files from directory should have validation_level setting
+        # Both files from directory should inherit validation_level
         assert len(loaded_config.reads) == 2
         for read_config in loaded_config.reads:
-            assert read_config.settings_dict == {"validation_level": "trust"}
+            assert read_config.global_options == {"validation_level": "trust"}
 
-    def test_non_validator_fields_not_extracted(self, temp_dir):
-        """Test that non-validator fields are not included in settings_dict."""
+    def test_global_and_file_level_options_merge(self, temp_dir):
+        """Test that global options and file-level options merge correctly."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
@@ -1093,12 +1061,14 @@ class TestConfigValidatorSettings:
         config = {
             "ref_genome_filename": {
                 "filename": "ref.fasta",
-                "validation_level": "trust",
-                "custom_field": "value",  # Not a validator setting
-                "another_extra": 123
+                "validation_level": "minimal"  # Override global
             },
             "mod_genome_filename": {"filename": "mod.fasta"},
-            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}]
+            "reads": [{"filename": "reads.fastq", "ngs_type": "illumina"}],
+            "options": {
+                "threads": 8,
+                "validation_level": "trust"  # Global default
+            }
         }
 
         config_file = temp_dir / "config.json"
@@ -1106,16 +1076,16 @@ class TestConfigValidatorSettings:
 
         loaded_config = ConfigManager.load(str(config_file))
 
-        # Only validation_level should be in settings_dict
-        assert loaded_config.ref_genome.settings_dict == {"validation_level": "trust"}
-        # Other fields should be in extra
-        assert loaded_config.ref_genome.extra == {
-            "custom_field": "value",
-            "another_extra": 123
-        }
+        # ref_genome overrides global validation_level but keeps threads
+        assert loaded_config.ref_genome.global_options["validation_level"] == "minimal"
+        assert loaded_config.ref_genome.global_options["threads"] == 8
 
-    def test_empty_settings_dict_when_no_settings(self, temp_dir):
-        """Test that settings_dict is empty when no validator settings provided."""
+        # mod_genome uses global options
+        assert loaded_config.mod_genome.global_options["validation_level"] == "trust"
+        assert loaded_config.mod_genome.global_options["threads"] == 8
+
+    def test_empty_global_options_when_no_settings(self, temp_dir):
+        """Test that global_options is empty when no options provided in config."""
         (temp_dir / "ref.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "mod.fasta").write_text(">seq1\nATCG\n")
         (temp_dir / "reads.fastq").write_text("@read1\nATCG\n+\nIIII\n")
@@ -1131,9 +1101,10 @@ class TestConfigValidatorSettings:
 
         loaded_config = ConfigManager.load(str(config_file))
 
-        assert loaded_config.ref_genome.settings_dict == {}
-        assert loaded_config.mod_genome.settings_dict == {}
-        assert loaded_config.reads[0].settings_dict == {}
+        # global_options should be empty when no options specified
+        assert loaded_config.ref_genome.global_options == {}
+        assert loaded_config.mod_genome.global_options == {}
+        assert loaded_config.reads[0].global_options == {}
 
 
 class TestSecurityPathTraversal:

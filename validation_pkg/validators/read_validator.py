@@ -189,7 +189,7 @@ class ReadValidator:
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
 
-    def __post_init__(self):
+        print("post init")
         if not self.validation_level:
             self.validation_level = 'strict'    #   default global value
 
@@ -201,7 +201,6 @@ class ReadValidator:
             # Override output_subdir_name with ngs_type
             self.settings = self.settings.update(output_subdir_name=self.read_config.ngs_type)
             self.logger.debug(f"Applied outdir_by_ngs_type: output_subdir_name set to '{self.read_config.ngs_type}'")
-
 
     def run(self) -> None:
         """
@@ -556,57 +555,65 @@ class ReadValidator:
 
         # Parallel validation (strict mode with threads > 1)
         if use_parallel:
-            # Determine chunk size: min 1000 records per chunk, or split into 4 chunks per worker
-            chunk_size = max(1000, validate_count // (self.threads * 4))
+            # Enable parallel logging mode (adds process_id and thread_id to logs)
+            self.logger.enable_parallel_logging()
 
-            self.logger.debug(
-                f"Parallel processing configuration: {self.threads} workers, chunk_size={chunk_size:,}",
-                workers=self.threads,
-                chunk_size=chunk_size,
-                estimated_chunks=validate_count // chunk_size
-            )
+            try:
+                # Determine chunk size: min 1000 records per chunk, or split into 4 chunks per worker
+                chunk_size = max(1000, validate_count // (self.threads * 4))
 
-            # Create partial function with settings
-            validator_func = partial(
-                _validate_single_read,
-                check_invalid_chars=self.settings.check_invalid_chars,
-                allow_empty_id=self.settings.allow_empty_id
-            )
+                self.logger.debug(
+                    f"Parallel processing configuration: {self.threads} workers, chunk_size={chunk_size:,}",
+                    workers=self.threads,
+                    chunk_size=chunk_size,
+                    estimated_chunks=validate_count // chunk_size
+                )
 
-            # Validate in parallel
-            self.logger.debug(f"Starting parallel validation across {self.threads} worker processes...")
-            with Pool(processes=self.threads) as pool:
-                results = pool.map(validator_func, self.sequences[:validate_count], chunksize=chunk_size)
+                # Create partial function with settings
+                validator_func = partial(
+                    _validate_single_read,
+                    check_invalid_chars=self.settings.check_invalid_chars,
+                    allow_empty_id=self.settings.allow_empty_id
+                )
 
-            self.logger.debug(
-                f"Parallel validation completed: {validate_count:,} sequences processed",
-                sequences_validated=validate_count
-            )
+                # Validate in parallel
+                self.logger.debug(f"Starting parallel validation across {self.threads} worker processes...")
+                with Pool(processes=self.threads) as pool:
+                    results = pool.map(validator_func, self.sequences[:validate_count], chunksize=chunk_size)
 
-            # Collect errors
-            errors = []
-            for idx, result in enumerate(results):
-                if 'error' in result:
-                    # Add index to details if missing
-                    if result['details'].get('sequence_index') is None:
-                        result['details']['sequence_index'] = idx
+                self.logger.debug(
+                    f"Parallel validation completed: {validate_count:,} sequences processed",
+                    sequences_validated=validate_count
+                )
 
-                    # Log validation issue
-                    self.logger.add_validation_issue(
-                        level='ERROR',
-                        category='read',
-                        message=f"Sequence '{result['record_id']}': {result['error']}",
-                        details=result['details']
-                    )
-                    errors.append(result)
+                # Collect errors
+                errors = []
+                for idx, result in enumerate(results):
+                    if 'error' in result:
+                        # Add index to details if missing
+                        if result['details'].get('sequence_index') is None:
+                            result['details']['sequence_index'] = idx
 
-            # Raise if any errors found
-            if errors:
-                error_msg = f"{len(errors)} validation error(s) found in sequences (parallel validation)"
-                self.logger.error(error_msg, error_count=len(errors), total_sequences=validate_count)
-                raise ReadValidationError(error_msg)
-            else:
-                self.logger.info(f"✓ All {validate_count:,} sequences validated successfully (parallel mode)")
+                        # Log validation issue
+                        self.logger.add_validation_issue(
+                            level='ERROR',
+                            category='read',
+                            message=f"Sequence '{result['record_id']}': {result['error']}",
+                            details=result['details']
+                        )
+                        errors.append(result)
+
+                # Raise if any errors found
+                if errors:
+                    error_msg = f"{len(errors)} validation error(s) found in sequences (parallel validation)"
+                    self.logger.error(error_msg, error_count=len(errors), total_sequences=validate_count)
+                    raise ReadValidationError(error_msg)
+                else:
+                    self.logger.info(f"✓ All {validate_count:,} sequences validated successfully (parallel mode)")
+
+            finally:
+                # Always disable parallel logging mode when done
+                self.logger.disable_parallel_logging()
 
         # Sequential validation (trust mode or single-threaded)
         else:

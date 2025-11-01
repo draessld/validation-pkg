@@ -62,12 +62,14 @@ class TestGenomeValidatorInitialization:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         # Use min_sequence_length=0 to avoid filtering test sequences
         settings = GenomeValidator.Settings(min_sequence_length=0)
-        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator = GenomeValidator(genome_config, settings)
 
         assert validator.input_path == simple_fasta
         assert validator.output_dir == output_dir
@@ -85,10 +87,12 @@ class TestGenomeValidatorInitialization:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator = GenomeValidator(genome_config, settings)
 
         assert validator.settings.min_sequence_length == 500
         assert validator.settings.replace_id_with == "chr"
@@ -162,11 +166,13 @@ class TestGenomeValidatorParsing:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, default_settings)
+        validator.run()
 
         # With plasmid_split=False (default), both sequences remain
         assert len(validator.sequences) == 2
@@ -181,11 +187,13 @@ class TestGenomeValidatorParsing:
             filename="genome.gbk",
             filepath=simple_genbank,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.GENBANK
+            detected_format=GenomeFormat.GENBANK,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, default_settings)
+        validator.run()
 
         assert len(validator.sequences) == 1
         assert validator.sequences[0].id == "TEST001"
@@ -196,13 +204,15 @@ class TestGenomeValidatorParsing:
             filename="empty.fasta",
             filepath=empty_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
+        validator = GenomeValidator(genome_config, default_settings)
 
         with pytest.raises(FastaFormatError, match="No sequences found"):
-            validator.validate()
+            validator.run()
 
     def test_parse_invalid_fasta_raises_error(self, invalid_fasta, output_dir, default_settings):
         """Test that invalid FASTA raises FastaFormatError."""
@@ -210,13 +220,15 @@ class TestGenomeValidatorParsing:
             filename="invalid.fasta",
             filepath=invalid_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
+        validator = GenomeValidator(genome_config, default_settings)
 
         with pytest.raises((FastaFormatError, GenomeValidationError)):
-            validator.validate()
+            validator.run()
 
 
 class TestGenomeValidatorCompression:
@@ -262,11 +274,13 @@ class TestGenomeValidatorCompression:
             filename="genome.fasta.gz",
             filepath=compressed_fasta_gz,
             coding_type=CodingType.GZIP,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, default_settings)
+        validator.run()
 
         assert len(validator.sequences) == 1
         assert str(validator.sequences[0].seq) == "ATCGATCGATCGATCGATCG"
@@ -277,11 +291,13 @@ class TestGenomeValidatorCompression:
             filename="genome.fasta.bz2",
             filepath=compressed_fasta_bz2,
             coding_type=CodingType.BZIP2,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, default_settings)
+        validator.run()
 
         assert len(validator.sequences) == 1
         assert str(validator.sequences[0].seq) == "ATCGATCGATCGATCGATCG"
@@ -343,13 +359,15 @@ class TestGenomeValidatorValidation:
             filename="empty_seq.fasta",
             filepath=fasta_with_empty_sequence,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
+        validator = GenomeValidator(genome_config, default_settings)
 
         with pytest.raises(GenomeValidationError, match="zero length"):
-            validator.validate()
+            validator.run()
 
 
 class TestGenomeValidatorEditing:
@@ -387,11 +405,13 @@ class TestGenomeValidatorEditing:
             filename="mixed_lengths.fasta",
             filepath=fasta_with_mixed_lengths,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Only long_seq (400bp) should remain
         assert len(validator.sequences) == 1
@@ -410,11 +430,13 @@ class TestGenomeValidatorEditing:
             filename="mixed_lengths.fasta",
             filepath=fasta_with_mixed_lengths,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # All sequences should have ID replaced with "chr" (line 308: record.id = f"{prefix}")
         assert all(seq.id == "chr" for seq in validator.sequences)
@@ -474,11 +496,13 @@ class TestGenomeValidatorOutput:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check output file exists
         output_files = list(output_dir.glob("*.fasta"))
@@ -493,11 +517,13 @@ class TestGenomeValidatorOutput:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check gzip output file exists
         output_files = list(output_dir.glob("*.fasta.gz"))
@@ -516,11 +542,13 @@ class TestGenomeValidatorOutput:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check bzip2 output file exists
         output_files = list(output_dir.glob("*.fasta.bz2"))
@@ -539,11 +567,13 @@ class TestGenomeValidatorOutput:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         output_files = list(output_dir.glob("*_processed.fasta"))
         assert len(output_files) == 1
@@ -556,11 +586,13 @@ class TestGenomeValidatorOutput:
             filename="genome.fasta",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         subdir = output_dir / "genomes"
         assert subdir.exists()
@@ -573,11 +605,13 @@ class TestGenomeValidatorOutput:
             filename="genome.gbk",
             filepath=simple_genbank,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.GENBANK
+            detected_format=GenomeFormat.GENBANK,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, default_settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, default_settings)
+        validator.run()
 
         # Output should be FASTA
         output_files = list(output_dir.glob("*.fasta"))
@@ -637,7 +671,9 @@ class TestGenomeValidatorPlasmidSplit:
             filename="genome_plasmids.fasta",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         settings = GenomeValidator.Settings(
@@ -645,8 +681,8 @@ class TestGenomeValidatorPlasmidSplit:
             min_sequence_length=0  # Don't filter by length
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Main output should have only 1 sequence (longest)
         assert len(validator.sequences) == 1
@@ -688,7 +724,9 @@ class TestGenomeValidatorPlasmidSplit:
             filename="genome_plasmids.fasta",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         settings = GenomeValidator.Settings(
@@ -697,8 +735,8 @@ class TestGenomeValidatorPlasmidSplit:
             warn_n_sequences=2  # Default threshold
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # With plasmid_split=False, the warning is issued (line 248) and setting forced to True,
         # but the actual split logic (line 311) checks if plasmid_split AND len > 1
@@ -719,7 +757,9 @@ class TestGenomeValidatorPlasmidSplit:
             filename="genome_two_seqs.fasta",
             filepath=fasta_with_two_sequences,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         settings = GenomeValidator.Settings(
@@ -728,8 +768,8 @@ class TestGenomeValidatorPlasmidSplit:
             warn_n_sequences=2  # Default threshold
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # With 2 sequences and warn_n_sequences=2, split IS triggered (>= comparison at line 238)
         # Only 1 sequence (longest) should remain
@@ -746,7 +786,9 @@ class TestGenomeValidatorPlasmidSplit:
             filename="genome_plasmids.fasta",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         settings = GenomeValidator.Settings(
@@ -755,8 +797,8 @@ class TestGenomeValidatorPlasmidSplit:
             min_sequence_length=0
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check filenames include suffix
         main_file = output_dir / "genome_plasmids_validated.fasta"
@@ -774,7 +816,9 @@ class TestGenomeValidatorPlasmidSplit:
             filename="genome_plasmids.fasta",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         settings = GenomeValidator.Settings(
@@ -783,8 +827,8 @@ class TestGenomeValidatorPlasmidSplit:
             min_sequence_length=0
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check all files are compressed
         main_file = output_dir / "genome_plasmids.fasta.gz"
@@ -815,7 +859,9 @@ class TestGenomeValidatorPlasmidSplit:
             filename="genome_plasmids.fasta",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={}
         )
 
         settings = GenomeValidator.Settings(
@@ -824,8 +870,8 @@ class TestGenomeValidatorPlasmidSplit:
             min_sequence_length=0
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check all files are in subdirectory
         main_file = output_dir / "genomes" / "genome_plasmids.fasta"
@@ -877,19 +923,19 @@ class TestGenomeValidatorValidationLevels:
 
     def test_strict_correct_file_passes(self, multi_seq_fasta, output_dir):
         """Test strict mode with correct FASTA file - should pass."""
-        settings = GenomeValidator.Settings(
-            validation_level='strict',
-            min_sequence_length=0
+        settings = GenomeValidator.Settings(min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Output file should exist
         output_files = list(output_dir.glob("*.fasta"))
@@ -900,39 +946,39 @@ class TestGenomeValidatorValidationLevels:
 
     def test_strict_damaged_file_fails(self, damaged_fasta, output_dir):
         """Test strict mode with damaged file - should fail."""
-        settings = GenomeValidator.Settings(
-            validation_level='strict',
-            allow_empty_id=False,
+        settings = GenomeValidator.Settings(allow_empty_id=False,
             min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="damaged.fasta",
             filepath=damaged_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator = GenomeValidator(genome_config, settings)
 
         with pytest.raises(GenomeValidationError, match="has no ID"):
-            validator.validate()
+            validator.run()
 
     def test_strict_applies_edits(self, multi_seq_fasta, output_dir):
         """Test strict mode applies all edits."""
-        settings = GenomeValidator.Settings(
-            validation_level='strict',
-            replace_id_with='genome',
+        settings = GenomeValidator.Settings(replace_id_with='genome',
             min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check that ID replacement was applied
         output_file = list(output_dir.glob("*.fasta"))[0]
@@ -945,19 +991,19 @@ class TestGenomeValidatorValidationLevels:
 
     def test_trust_correct_file_passes(self, multi_seq_fasta, output_dir):
         """Test trust mode with correct FASTA file - should pass."""
-        settings = GenomeValidator.Settings(
-            validation_level='trust',
-            min_sequence_length=0
+        settings = GenomeValidator.Settings(min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Should parse ALL sequences, all remain (plasmid_split=False by default)
         assert len(validator.sequences) == 3
@@ -967,29 +1013,27 @@ class TestGenomeValidatorValidationLevels:
 
     def test_trust_damaged_first_sequence_fails(self, damaged_fasta, output_dir):
         """Test trust mode detects error in first sequence."""
-        settings = GenomeValidator.Settings(
-            validation_level='trust',
-            allow_empty_id=False,
+        settings = GenomeValidator.Settings(allow_empty_id=False,
             min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="damaged.fasta",
             filepath=damaged_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator = GenomeValidator(genome_config, settings)
 
         # Should fail because first sequence has empty ID
         with pytest.raises(GenomeValidationError, match="has no ID"):
-            validator.validate()
+            validator.run()
 
     def test_trust_applies_edits(self, multi_seq_fasta, output_dir):
         """Test trust mode applies all edits to all sequences."""
-        settings = GenomeValidator.Settings(
-            validation_level='trust',
-            replace_id_with='genome',
+        settings = GenomeValidator.Settings(replace_id_with='genome',
             min_sequence_length=0,
             plasmid_split=True  # Enable plasmid split to test edits on all sequences
         )
@@ -997,11 +1041,13 @@ class TestGenomeValidatorValidationLevels:
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check that ID replacement was applied to ALL sequences
         # Main sequence + plasmid files
@@ -1019,39 +1065,39 @@ class TestGenomeValidatorValidationLevels:
 
     def test_trust_filters_short_sequences(self, multi_seq_fasta, output_dir):
         """Test trust mode applies min_sequence_length filter."""
-        settings = GenomeValidator.Settings(
-            validation_level='trust',
-            min_sequence_length=100  # Will filter out all test sequences
+        settings = GenomeValidator.Settings(min_sequence_length=100  # Will filter out all test sequences
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # All sequences should be filtered out
         assert len(validator.sequences) == 0
 
     def test_trust_handles_plasmids(self, multi_seq_fasta, output_dir):
         """Test trust mode handles plasmid splitting."""
-        settings = GenomeValidator.Settings(
-            validation_level='trust',
-            plasmid_split=True,
+        settings = GenomeValidator.Settings(plasmid_split=True,
             min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Should have main file + 2 plasmid files
         output_files = list(output_dir.glob("*.fasta"))
@@ -1069,19 +1115,19 @@ class TestGenomeValidatorValidationLevels:
 
     def test_minimal_correct_file_passes(self, multi_seq_fasta, output_dir):
         """Test minimal mode with correct file - should pass without validation."""
-        settings = GenomeValidator.Settings(
-            validation_level='minimal',
-            min_sequence_length=0
+        settings = GenomeValidator.Settings(min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # No sequences parsed in minimal mode
         assert len(validator.sequences) == 0
@@ -1091,21 +1137,21 @@ class TestGenomeValidatorValidationLevels:
 
     def test_minimal_damaged_file_passes(self, damaged_fasta, output_dir):
         """Test minimal mode with damaged file - should pass (no validation)."""
-        settings = GenomeValidator.Settings(
-            validation_level='minimal',
-            allow_empty_id=False,  # Ignored in minimal mode
+        settings = GenomeValidator.Settings(allow_empty_id=False,  # Ignored in minimal mode
             min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="damaged.fasta",
             filepath=damaged_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator = GenomeValidator(genome_config, settings)
         # Should NOT raise - minimal mode doesn't validate
-        validator.validate()
+        validator.run()
 
         # Output should be created
         output_files = list(output_dir.glob("*.fasta"))
@@ -1113,19 +1159,19 @@ class TestGenomeValidatorValidationLevels:
 
     def test_minimal_output_is_copy(self, multi_seq_fasta, output_dir):
         """Test that minimal mode copies file as-is."""
-        settings = GenomeValidator.Settings(
-            validation_level='minimal',
-            min_sequence_length=0
+        settings = GenomeValidator.Settings(min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Check output file exists
         output_files = list(output_dir.glob("*.fasta"))
@@ -1137,20 +1183,20 @@ class TestGenomeValidatorValidationLevels:
 
     def test_minimal_does_not_apply_edits(self, multi_seq_fasta, output_dir):
         """Test minimal mode does NOT apply edits."""
-        settings = GenomeValidator.Settings(
-            validation_level='minimal',
-            replace_id_with='genome',  # Should be ignored
+        settings = GenomeValidator.Settings(replace_id_with='genome',  # Should be ignored
             min_sequence_length=100  # Should be ignored
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # Output should be identical to input (no edits applied)
         output_file = list(output_dir.glob("*.fasta"))[0]
@@ -1174,19 +1220,19 @@ class TestGenomeValidatorValidationLevels:
             f.write(">chr2\n")
             f.write("GCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA\n")
 
-        settings = GenomeValidator.Settings(
-            validation_level='trust',
-            min_sequence_length=0
+        settings = GenomeValidator.Settings(min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta.gz",
             filepath=fasta_file,
             coding_type=CodingType.GZIP,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
-        validator.validate()
+        validator = GenomeValidator(genome_config, settings)
+        validator.run()
 
         # All sequences remain (plasmid_split=False by default)
         assert len(validator.sequences) == 2
@@ -1198,41 +1244,21 @@ class TestGenomeValidatorValidationLevels:
             f.write(">chr1\n")
             f.write("ATCGATCGATCGATCGATCGATCGATCGATCG\n")
 
-        settings = GenomeValidator.Settings(
-            validation_level='minimal',
-            min_sequence_length=0
+        settings = GenomeValidator.Settings(min_sequence_length=0
         )
         genome_config = GenomeConfig(
             filename="genome.fasta.bz2",
             filepath=fasta_file,
             coding_type=CodingType.BZIP2,
-            detected_format=GenomeFormat.FASTA
+            detected_format=GenomeFormat.FASTA,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = GenomeValidator(genome_config, output_dir, settings)
+        validator = GenomeValidator(genome_config, settings)
 
         # Should raise error - minimal mode requires input coding to match output coding
         with pytest.raises(GenomeValidationError, match="input coding to match output coding"):
-            validator.validate()
-
-    # ===== Test for invalid validation level =====
-
-    def test_invalid_validation_level_raises_error(self, multi_seq_fasta, output_dir):
-        """Test that invalid validation level raises ValueError."""
-        settings = GenomeValidator.Settings(
-            validation_level='invalid_mode',
-            min_sequence_length=0
-        )
-        genome_config = GenomeConfig(
-            filename="genome.fasta",
-            filepath=multi_seq_fasta,
-            coding_type=CodingType.NONE,
-            detected_format=GenomeFormat.FASTA
-        )
-
-        with pytest.raises(ValueError, match="Invalid validation_level"):
-            GenomeValidator(genome_config, output_dir, settings)
-
-
+            validator.run()
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

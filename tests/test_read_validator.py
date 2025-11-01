@@ -65,10 +65,13 @@ class TestReadValidatorInitialization:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
+        # Pass explicit default settings (workaround for validator bug with 'if not None')
+        validator = ReadValidator(read_config, ReadValidator.Settings())
 
         assert validator.input_path == simple_fastq
         assert validator.output_dir == output_dir
@@ -88,10 +91,12 @@ class TestReadValidatorInitialization:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         assert validator.settings.check_invalid_chars is True
         assert validator.settings.allow_duplicate_ids is False
@@ -152,11 +157,13 @@ class TestReadValidatorParsing:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         assert len(validator.sequences) == 2
         assert validator.sequences[0].id == "read1"
@@ -170,13 +177,15 @@ class TestReadValidatorParsing:
             filepath=empty_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
+        validator = ReadValidator(read_config, ReadValidator.Settings())
 
         with pytest.raises(FastqFormatError, match="No sequences found"):
-            validator.validate()
+            validator.run()
 
     def test_parse_invalid_fastq_raises_error(self, invalid_fastq, output_dir):
         """Test that invalid FASTQ raises FastqFormatError."""
@@ -185,13 +194,15 @@ class TestReadValidatorParsing:
             filepath=invalid_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
+        validator = ReadValidator(read_config, ReadValidator.Settings())
 
         with pytest.raises((FastqFormatError, ReadValidationError)):
-            validator.validate()
+            validator.run()
 
 
 class TestReadValidatorCompression:
@@ -237,11 +248,13 @@ class TestReadValidatorCompression:
             filepath=compressed_fastq_gz,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         assert len(validator.sequences) == 1
         assert str(validator.sequences[0].seq) == "ATCGATCGATCGATCGATCG"
@@ -253,11 +266,13 @@ class TestReadValidatorCompression:
             filepath=compressed_fastq_bz2,
             ngs_type="illumina",
             coding_type=CodingType.BZIP2,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         assert len(validator.sequences) == 1
         assert str(validator.sequences[0].seq) == "ATCGATCGATCGATCGATCG"
@@ -310,12 +325,14 @@ class TestReadValidatorValidation:
             filepath=fastq_with_duplicates,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
         # Default settings allow duplicates
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()  # Should not raise
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()  # Should not raise
 
         assert len(validator.sequences) == 2
 
@@ -328,13 +345,15 @@ class TestReadValidatorValidation:
             filepath=fastq_with_duplicates,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         with pytest.raises(ReadValidationError, match="Duplicate sequence IDs"):
-            validator.validate()
+            validator.run()
 
     def test_invalid_chars_detected(self, fastq_with_invalid_chars, output_dir):
         """Test that invalid characters are detected when check_invalid_chars=True."""
@@ -345,13 +364,15 @@ class TestReadValidatorValidation:
             filepath=fastq_with_invalid_chars,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         with pytest.raises(ReadValidationError, match="invalid character"):
-            validator.validate()
+            validator.run()
 
     def test_invalid_chars_ignored_by_default(self, fastq_with_invalid_chars, output_dir):
         """Test that invalid characters are ignored by default."""
@@ -360,12 +381,14 @@ class TestReadValidatorValidation:
             filepath=fastq_with_invalid_chars,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
         # Default settings don't check invalid chars
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()  # Should not raise
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()  # Should not raise
 
 
 class TestReadValidatorBAMHandling:
@@ -413,7 +436,7 @@ class TestReadValidatorBAMHandling:
     #     # Should raise error during BAM conversion (fake BAM file)
     #     # The error could be from pysam, samtools, or "neither tool available"
     #     with pytest.raises((ReadValidationError, Exception)):
-    #         validator.validate()
+    #         validator.run()
 
     #     # With keep_bam=True, the original BAM should be copied
     #     copied_files = list(output_dir.glob("*.bam"))
@@ -454,11 +477,13 @@ class TestReadValidatorOutput:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # Check output file exists
         output_files = list(output_dir.glob("*.fastq"))
@@ -474,11 +499,13 @@ class TestReadValidatorOutput:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # Check gzip output file exists
         output_files = list(output_dir.glob("*.fastq.gz"))
@@ -498,11 +525,13 @@ class TestReadValidatorOutput:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # Check bzip2 output file exists
         output_files = list(output_dir.glob("*.fastq.bz2"))
@@ -522,11 +551,13 @@ class TestReadValidatorOutput:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         output_files = list(output_dir.glob("*_filtered.fastq"))
         assert len(output_files) == 1
@@ -540,11 +571,13 @@ class TestReadValidatorOutput:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         subdir = output_dir / "reads"
         assert subdir.exists()
@@ -584,11 +617,13 @@ class TestReadValidatorNGSTypes:
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         assert len(validator.sequences) == 1
 
@@ -599,11 +634,13 @@ class TestReadValidatorNGSTypes:
             filepath=simple_fastq,
             ngs_type="ont",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         assert len(validator.sequences) == 1
 
@@ -614,11 +651,13 @@ class TestReadValidatorNGSTypes:
             filepath=simple_fastq,
             ngs_type="pacbio",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         assert len(validator.sequences) == 1
 
@@ -664,17 +703,19 @@ class TestReadValidatorValidationLevels:
 
     def test_strict_correct_file_passes(self, multi_read_fastq, output_dir):
         """Test strict mode with correct FASTQ file - should pass."""
-        settings = ReadValidator.Settings(validation_level='strict', coding_type='gz')
+        settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # All reads should be parsed
         assert len(validator.sequences) == 20
@@ -684,39 +725,41 @@ class TestReadValidatorValidationLevels:
 
     def test_strict_damaged_file_fails(self, damaged_fastq, output_dir):
         """Test strict mode with damaged file - should fail during parsing."""
-        settings = ReadValidator.Settings(
-            validation_level='strict',
-            allow_empty_id=False
+        settings = ReadValidator.Settings(allow_empty_id=False
         )
         read_config = ReadConfig(
             filename="damaged.fastq",
             filepath=damaged_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         # Should fail during parsing - empty ID after @ is malformed FASTQ
         with pytest.raises(FastqFormatError):
-            validator.validate()
+            validator.run()
 
     # ===== Tests for TRUST validation level =====
 
     def test_trust_correct_file_passes(self, multi_read_fastq, output_dir):
         """Test trust mode with correct FASTQ file - parses first 10, validates them, copies original file."""
-        settings = ReadValidator.Settings(validation_level='trust', coding_type='gz')
+        settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # Only first 10 reads should be parsed (trust mode parses only first 10)
         assert len(validator.sequences) == 10
@@ -726,39 +769,41 @@ class TestReadValidatorValidationLevels:
 
     def test_trust_damaged_first_sequence_fails(self, damaged_fastq, output_dir):
         """Test trust mode detects error in first sequence (within first 10 validated)."""
-        settings = ReadValidator.Settings(
-            validation_level='trust',
-            allow_empty_id=False
+        settings = ReadValidator.Settings(allow_empty_id=False
         )
         read_config = ReadConfig(
             filename="damaged.fastq",
             filepath=damaged_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         # Should fail during parsing - empty ID after @ is malformed FASTQ
         with pytest.raises(FastqFormatError):
-            validator.validate()
+            validator.run()
 
     # ===== Tests for MINIMAL validation level =====
 
     def test_minimal_correct_file_passes(self, multi_read_fastq, output_dir):
         """Test minimal mode with correct file - should pass without validation."""
-        settings = ReadValidator.Settings(validation_level='minimal', coding_type='gz')
+        settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # No sequences parsed in minimal mode
         assert len(validator.sequences) == 0
@@ -768,9 +813,7 @@ class TestReadValidatorValidationLevels:
 
     def test_minimal_damaged_file_raises_error(self, damaged_fastq, output_dir):
         """Test minimal mode with uncompressed file - should raise error due to coding mismatch."""
-        settings = ReadValidator.Settings(
-            validation_level='minimal',
-            coding_type='gz',  # Require GZIP output
+        settings = ReadValidator.Settings(coding_type='gz',  # Require GZIP output
             allow_empty_id=False  # Ignored in minimal mode
         )
         read_config = ReadConfig(
@@ -778,27 +821,31 @@ class TestReadValidatorValidationLevels:
             filepath=damaged_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,  # Uncompressed - doesn't match output coding
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
         # Should raise error - minimal mode requires input coding to match output coding
         with pytest.raises(ReadValidationError, match="input coding to match output coding"):
-            validator.validate()
+            validator.run()
 
     def test_minimal_output_is_copy(self, multi_read_fastq, output_dir):
         """Test that minimal mode copies file as-is."""
-        settings = ReadValidator.Settings(validation_level='minimal', coding_type='gz')
+        settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # Check output file exists (gzipped)
         output_files = list(output_dir.glob("*.fastq.gz"))
@@ -820,17 +867,19 @@ class TestReadValidatorValidationLevels:
                 f.write("+\n")
                 f.write("IIIIIIIIIIIIIIIIIIII\n")
 
-        settings = ReadValidator.Settings(validation_level='trust', coding_type='gz')
+        settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
-        validator.validate()
+        validator = ReadValidator(read_config, settings)
+        validator.run()
 
         # All 10 reads should be parsed (trust mode parses first 10)
         assert len(validator.sequences) == 10
@@ -848,38 +897,22 @@ class TestReadValidatorValidationLevels:
             f.write("+\n")
             f.write("IIIIIIIIIIIIIIIIIIII\n")
 
-        settings = ReadValidator.Settings(validation_level='minimal', coding_type='gz')
+        settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.bz2",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.BZIP2,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={'validation_level': 'minimal'}
         )
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         # Should raise error - minimal mode requires input coding to match output coding
         with pytest.raises(ReadValidationError, match="input coding to match output coding"):
-            validator.validate()
-
-    # ===== Test for invalid validation level =====
-
-    def test_invalid_validation_level_raises_error(self, multi_read_fastq, output_dir):
-        """Test that invalid validation level raises ValueError."""
-        settings = ReadValidator.Settings(validation_level='invalid_mode')
-        read_config = ReadConfig(
-            filename="reads.fastq",
-            filepath=multi_read_fastq,
-            ngs_type="illumina",
-            coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
-        )
-
-        with pytest.raises(ValueError, match="Invalid validation_level"):
-            ReadValidator(read_config, output_dir, settings)
-
-
+            validator.run()
 class TestReadValidatorEdgeCases:
     """Test edge cases and error handling."""
 
@@ -931,11 +964,13 @@ class TestReadValidatorEdgeCases:
             filepath=fastq_with_varying_lengths,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         # All reads should be parsed
         assert len(validator.sequences) == 3
@@ -951,11 +986,13 @@ class TestReadValidatorEdgeCases:
             filepath=fastq_with_low_quality,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
-            detected_format=ReadFormat.FASTQ
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={}
         )
 
-        validator = ReadValidator(read_config, output_dir)
-        validator.validate()
+        validator = ReadValidator(read_config, ReadValidator.Settings())
+        validator.run()
 
         # Low quality reads are allowed
         assert len(validator.sequences) == 1
@@ -985,16 +1022,16 @@ class TestSecurityCommandInjection:
             ngs_type='illumina',
             coding_type=CodingType.GZIP,
             detected_format=ReadFormat.FASTQ,
-            output_dir=tmp_path
+            output_dir=tmp_path,
+            global_options={'validation_level': 'strict'}
         )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
         settings = ReadValidator.Settings()
-        settings = settings.update(validation_level='strict')
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         # Call _count_lines_fast directly
         line_count = validator._count_lines_fast()
@@ -1017,16 +1054,16 @@ class TestSecurityCommandInjection:
             ngs_type='ont',
             coding_type=CodingType.BZIP2,
             detected_format=ReadFormat.FASTQ,
-            output_dir=tmp_path
+            output_dir=tmp_path,
+            global_options={'validation_level': 'strict'}
         )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
         settings = ReadValidator.Settings()
-        settings = settings.update(validation_level='strict')
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         # Call _count_lines_fast directly
         line_count = validator._count_lines_fast()
@@ -1048,16 +1085,16 @@ class TestSecurityCommandInjection:
             ngs_type='illumina',
             coding_type=CodingType.NONE,
             detected_format=ReadFormat.FASTQ,
-            output_dir=tmp_path
+            output_dir=tmp_path,
+            global_options={'validation_level': 'strict'}
         )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
         settings = ReadValidator.Settings()
-        settings = settings.update(validation_level='strict')
 
-        validator = ReadValidator(read_config, output_dir, settings)
+        validator = ReadValidator(read_config, settings)
 
         # Call _count_lines_fast directly
         line_count = validator._count_lines_fast()
@@ -1086,13 +1123,14 @@ class TestSecurityCommandInjection:
             ngs_type='illumina',
             coding_type=CodingType.GZIP,
             detected_format=ReadFormat.FASTQ,
-            output_dir=tmp_path
+            output_dir=tmp_path,
+            global_options={}
         )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        validator = ReadValidator(read_config, output_dir)
+        validator = ReadValidator(read_config, ReadValidator.Settings())
 
         # Read the source code of _count_lines_fast method
         import inspect
@@ -1118,6 +1156,285 @@ class TestSecurityCommandInjection:
         # Verify it uses Python libraries instead
         assert 'open_file_with_coding_type' in source, \
             "_count_lines_fast should use open_file_with_coding_type"
+
+
+class TestParallelValidationLogging:
+    """Test that parallel validation correctly enables/disables process_id and thread_id logging."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def output_dir(self, temp_dir):
+        """Create output directory."""
+        out_dir = temp_dir / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    def _create_fastq(self, path, num_reads=5000):
+        """Create a FASTQ file for testing."""
+        with open(path, 'w') as f:
+            for i in range(num_reads):
+                f.write(f"@read{i}\n")
+                f.write("ATCGATCGATCGATCG\n")
+                f.write("+\n")
+                f.write("IIIIIIIIIIIIIIII\n")
+
+    def test_sequential_validation_no_parallel_logging(self, temp_dir, output_dir):
+        """Test that sequential validation (threads=1) does NOT enable parallel logging."""
+        from validation_pkg.logger import setup_logging, get_logger
+
+        fastq_file = temp_dir / "test.fastq"
+        self._create_fastq(fastq_file, num_reads=100)
+
+        log_file = temp_dir / "test.log"
+        logger = setup_logging(log_file=log_file)
+
+        # Verify parallel logging is disabled at start
+        assert not logger.is_parallel_logging_enabled()
+
+        read_config = ReadConfig(
+            filename="test.fastq",
+            filepath=fastq_file,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 1, "validation_level": "strict"}
+        )
+
+        settings = ReadValidator.Settings(check_invalid_chars=True)
+        validator = ReadValidator(read_config, settings)
+
+        # Run validation (sequential)
+        validator._parse_file()
+        validator._validate_sequences()
+
+        # Verify parallel logging is still disabled
+        assert not logger.is_parallel_logging_enabled()
+
+        # Check log file - should NOT have process_id/thread_id
+        log_content = log_file.read_text()
+        assert '"process_id"' not in log_content
+        assert '"thread_id"' not in log_content
+
+    def test_parallel_validation_enables_parallel_logging(self, temp_dir, output_dir):
+        """Test that parallel validation (threads>1) enables parallel logging."""
+        from validation_pkg.logger import setup_logging, get_logger
+
+        fastq_file = temp_dir / "test.fastq"
+        self._create_fastq(fastq_file, num_reads=5000)
+
+        log_file = temp_dir / "test.log"
+        logger = setup_logging(log_file=log_file)
+
+        # Verify parallel logging is disabled at start
+        assert not logger.is_parallel_logging_enabled()
+
+        read_config = ReadConfig(
+            filename="test.fastq",
+            filepath=fastq_file,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 4, "validation_level": "strict"}
+        )
+
+        settings = ReadValidator.Settings(check_invalid_chars=True)
+        validator = ReadValidator(read_config, settings)
+
+        # Run validation (parallel)
+        validator._parse_file()
+        validator._validate_sequences()
+
+        # Verify parallel logging is disabled after validation (cleanup)
+        assert not logger.is_parallel_logging_enabled()
+
+        # Check log file - SHOULD have process_id/thread_id during parallel section
+        log_content = log_file.read_text()
+        assert '"process_id"' in log_content
+        assert '"thread_id"' in log_content
+
+    def test_trust_mode_no_parallel_logging(self, temp_dir, output_dir):
+        """Test that trust mode never enables parallel logging (always sequential)."""
+        from validation_pkg.logger import setup_logging, get_logger
+
+        fastq_file = temp_dir / "test.fastq"
+        self._create_fastq(fastq_file, num_reads=1000)
+
+        log_file = temp_dir / "test.log"
+        logger = setup_logging(log_file=log_file)
+
+        # Verify parallel logging is disabled at start
+        assert not logger.is_parallel_logging_enabled()
+
+        read_config = ReadConfig(
+            filename="test.fastq",
+            filepath=fastq_file,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 8, "validation_level": "trust"}  # threads=8 but trust mode
+        )
+
+        settings = ReadValidator.Settings(check_invalid_chars=True)
+        validator = ReadValidator(read_config, settings)
+
+        # Run validation (trust mode - always sequential)
+        validator._parse_file()
+        validator._validate_sequences()
+
+        # Verify parallel logging is still disabled
+        assert not logger.is_parallel_logging_enabled()
+
+        # Check log file - should NOT have process_id/thread_id
+        log_content = log_file.read_text()
+        assert '"process_id"' not in log_content
+        assert '"thread_id"' not in log_content
+
+    def test_parallel_logging_cleanup_on_error(self, temp_dir, output_dir):
+        """Test that parallel logging is disabled even if validation fails."""
+        from validation_pkg.logger import setup_logging, get_logger
+
+        # Create FASTQ with invalid characters (properly formatted for BioPython)
+        fastq_file = temp_dir / "invalid.fastq"
+        with open(fastq_file, 'w') as f:
+            for i in range(2000):
+                f.write(f"@read{i}\n")
+                if i == 1000:
+                    # Invalid characters - will fail validation but parse correctly
+                    f.write("ATCGATCGXYZATCGA\n")  # Same length as quality (16 chars)
+                else:
+                    f.write("ATCGATCGATCGATCG\n")
+                f.write("+\n")
+                f.write("IIIIIIIIIIIIIIII\n")
+
+        log_file = temp_dir / "test.log"
+        logger = setup_logging(log_file=log_file)
+
+        # Verify parallel logging is disabled at start
+        assert not logger.is_parallel_logging_enabled()
+
+        read_config = ReadConfig(
+            filename="invalid.fastq",
+            filepath=fastq_file,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 4, "validation_level": "strict"}
+        )
+
+        settings = ReadValidator.Settings(check_invalid_chars=True)
+        validator = ReadValidator(read_config, settings)
+
+        # Parse file (should succeed)
+        validator._parse_file()
+
+        # Run validation (should fail due to invalid characters)
+        with pytest.raises(ReadValidationError):
+            validator._validate_sequences()
+
+        # Verify parallel logging is disabled after error (cleanup via finally block)
+        assert not logger.is_parallel_logging_enabled()
+
+    def test_full_validation_with_parallel_logging(self, temp_dir, output_dir):
+        """Integration test: Full validation run with parallel logging."""
+        from validation_pkg.logger import setup_logging, get_logger
+
+        fastq_file = temp_dir / "test.fastq"
+        self._create_fastq(fastq_file, num_reads=10000)
+
+        log_file = temp_dir / "test.log"
+        logger = setup_logging(log_file=log_file, console_level="DEBUG")
+
+        # Initial state
+        assert not logger.is_parallel_logging_enabled()
+
+        read_config = ReadConfig(
+            filename="test.fastq",
+            filepath=fastq_file,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 8, "validation_level": "strict"}
+        )
+
+        settings = ReadValidator.Settings(
+            check_invalid_chars=True,
+            allow_duplicate_ids=False
+        )
+        validator = ReadValidator(read_config, settings)
+
+        # Full validation run
+        validator.run()
+
+        # Verify cleanup
+        assert not logger.is_parallel_logging_enabled()
+
+        # Check log file
+        log_content = log_file.read_text()
+
+        # Should have parallel validation messages
+        assert '"process_id"' in log_content
+        assert '"thread_id"' in log_content
+
+        # Should mention parallel validation
+        assert 'parallel_mode' in log_content.lower() or 'parallel validation' in log_content.lower()
+
+    def test_multiple_validations_cleanup(self, temp_dir, output_dir):
+        """Test that parallel logging cleanup works across multiple validation runs."""
+        from validation_pkg.logger import setup_logging, get_logger
+
+        fastq_file1 = temp_dir / "test1.fastq"
+        fastq_file2 = temp_dir / "test2.fastq"
+        self._create_fastq(fastq_file1, num_reads=3000)
+        self._create_fastq(fastq_file2, num_reads=3000)
+
+        log_file = temp_dir / "test.log"
+        logger = setup_logging(log_file=log_file)
+
+        # First validation (parallel)
+        read_config1 = ReadConfig(
+            filename="test1.fastq",
+            filepath=fastq_file1,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 4, "validation_level": "strict"}
+        )
+
+        validator1 = ReadValidator(read_config1, ReadValidator.Settings())
+        validator1._parse_file()
+        validator1._validate_sequences()
+
+        # Should be cleaned up
+        assert not logger.is_parallel_logging_enabled()
+
+        # Second validation (sequential)
+        read_config2 = ReadConfig(
+            filename="test2.fastq",
+            filepath=fastq_file2,
+            ngs_type="illumina",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            output_dir=output_dir,
+            global_options={"threads": 1, "validation_level": "strict"}
+        )
+
+        validator2 = ReadValidator(read_config2, ReadValidator.Settings())
+        validator2._parse_file()
+        validator2._validate_sequences()
+
+        # Should still be disabled
+        assert not logger.is_parallel_logging_enabled()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,10 @@ from datetime import datetime
 from typing import Optional
 from threading import Lock
 import structlog
+from contextvars import ContextVar
+
+# Context variable to track when parallel validation is active
+_parallel_validation_active: ContextVar[bool] = ContextVar('parallel_validation_active', default=False)
 
 
 # ANSI color codes for console output
@@ -52,20 +56,22 @@ def add_log_level_colors(_, level: str, event_dict: dict) -> dict:
 
 def add_process_info(logger, method_name, event_dict: dict) -> dict:
     """
-    Add process ID and thread ID to log entries.
+    Add process ID and thread ID to log entries (only when parallel validation is active).
 
-    This processor adds:
+    This processor conditionally adds:
     - process_id: The OS process ID (PID)
     - thread_id: The thread ID within the process
 
-    These help identify which worker process generated each log message
-    in parallel processing scenarios.
+    These fields only appear during parallel validation to avoid cluttering
+    logs during normal sequential processing.
     """
-    event_dict["process_id"] = os.getpid()
+    # Only add process/thread info during parallel validation
+    if _parallel_validation_active.get(False):
+        event_dict["process_id"] = os.getpid()
 
-    # Get thread ID (native thread identifier)
-    import threading
-    event_dict["thread_id"] = threading.get_native_id()
+        # Get thread ID (native thread identifier)
+        import threading
+        event_dict["thread_id"] = threading.get_native_id()
 
     return event_dict
 
@@ -76,8 +82,8 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
 
     Creates a formatted prefix like: [Worker-1 PID:12345]
     This appears before the log message for easy identification.
+    Only shows PID during parallel validation to keep sequential logs clean.
     """
-    pid = event_dict.get("process_id", os.getpid())
     worker_id = event_dict.get("worker_id")
     file_context = event_dict.get("file_context")
 
@@ -87,7 +93,10 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
     if worker_id:
         context_parts.append(f"{Colors.CYAN}Worker-{worker_id}{Colors.RESET}")
 
-    context_parts.append(f"{Colors.GRAY}PID:{pid}{Colors.RESET}")
+    # Only show PID during parallel validation
+    if _parallel_validation_active.get(False):
+        pid = event_dict.get("process_id", os.getpid())
+        context_parts.append(f"{Colors.GRAY}PID:{pid}{Colors.RESET}")
 
     if file_context:
         # Shorten long file paths
@@ -471,6 +480,45 @@ class ValidationLogger:
         if self.logger:
             # Unbind by re-getting the logger
             self.logger = structlog.get_logger("bioinformatics_validator")
+
+    def enable_parallel_logging(self):
+        """
+        Enable parallel validation logging mode.
+
+        When enabled, process_id and thread_id will be added to all log entries.
+        This should be called before starting parallel validation.
+
+        Example:
+            >>> logger = get_logger()
+            >>> logger.enable_parallel_logging()
+            >>> # Now process_id and thread_id appear in logs
+            >>> logger.info("Starting parallel validation")
+        """
+        _parallel_validation_active.set(True)
+
+    def disable_parallel_logging(self):
+        """
+        Disable parallel validation logging mode.
+
+        When disabled, process_id and thread_id will NOT be added to log entries.
+        This should be called after parallel validation completes.
+
+        Example:
+            >>> logger = get_logger()
+            >>> logger.disable_parallel_logging()
+            >>> # Now process_id and thread_id are hidden from logs
+            >>> logger.info("Parallel validation complete")
+        """
+        _parallel_validation_active.set(False)
+
+    def is_parallel_logging_enabled(self) -> bool:
+        """
+        Check if parallel validation logging mode is currently enabled.
+
+        Returns:
+            bool: True if parallel logging is enabled, False otherwise
+        """
+        return _parallel_validation_active.get(False)
 
     def __enter__(self):
         """

@@ -175,7 +175,6 @@ class FeatureValidator:
         # Parsed data
         self.features: List[Feature] = []
 
-    def __post_init__(self):
         if not self.validation_level:
             self.validation_level = 'strict'    #   default global value
 

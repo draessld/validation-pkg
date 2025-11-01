@@ -2,41 +2,69 @@
 
 ## Overview
 
-validation_pkg now includes **enhanced logging with process and worker identification** for parallel processing scenarios. This makes it easy to track which worker process handled which file during parallel execution.
+validation_pkg includes **enhanced logging with parallelism state detection and process identification**. The logging system automatically detects whether validation is running in parallel or sequential mode and provides appropriate context.
 
-## What's New
+## What's New (2025-10-30)
 
-### Process and Worker Identification
+### Parallel Validation Logging
 
-All log messages now include:
+The logging system now automatically detects and reports:
 
-1. **Process ID (PID)**: The operating system process ID
-2. **Thread ID**: The native thread identifier
-3. **Worker ID**: Sequential worker number (Worker-1, Worker-2, etc.)
-4. **File Context**: The filename being processed
+1. **Parallelism State**: Whether validation is running in parallel or sequential mode
+2. **Worker Information**: Number of worker processes and chunk configuration
+3. **Processing Statistics**: Sequences validated, chunk sizes, estimated chunks
+4. **Mode-Specific Messages**: Different output for sequential, parallel, and trust modes
 
 ### Example Log Output
 
-#### Console Output (Colored)
+#### Sequential Mode (threads=1)
 ```
-[Worker-1 PID:12345 sample_1.fastq] Processing read file
-[Worker-2 PID:12346 sample_2.fastq] Processing read file
-[Worker-1 PID:12345 sample_1.fastq] ✓ Parsed 1000 sequences
-[Worker-2 PID:12346 sample_2.fastq] ✓ Parsed 2000 sequences
-[PID:12340] ✓ Completed: sample_1.fastq
-[PID:12340] ✓ Completed: sample_2.fastq
+INFO     Sequential validation: 5,000 sequences (threads=1)
+DEBUG    ✓ Sequence validation passed
 ```
 
-#### File Output (JSON)
+#### Parallel Mode (threads>1)
+```
+INFO     Parallel validation enabled: 10,000 sequences across 4 workers
+DEBUG    Parallel processing configuration: 4 workers, chunk_size=2,500
+DEBUG    Starting parallel validation across 4 worker processes...
+DEBUG    Parallel validation completed: 10,000 sequences processed
+INFO     ✓ All 10,000 sequences validated successfully (parallel mode)
+```
+
+#### Trust Mode (always sequential)
+```
+INFO     Trust mode - validating first 10 of 10,000 sequences (sequential)
+DEBUG    ✓ Sequence validation passed
+```
+
+### Structured Logging Fields
+
+When parallel validation is active, additional fields are logged (visible in JSON log files):
+
+- `parallel_mode: true` - Indicates parallel processing is enabled
+- `workers: N` - Number of worker processes
+- `total_sequences: N` - Total sequences being validated
+- `chunk_size: N` - Records per chunk
+- `estimated_chunks: N` - Expected number of chunks
+- `sequences_validated: N` - Actual sequences processed
+- `error_count: N` - Number of validation errors (if any)
+
+### Process and Thread Information
+
+**Console Output**: Clean, user-friendly messages without PIDs/thread IDs
+
+**File Output (JSON)**: Full process tracking information
 ```json
 {
-  "event": "Processing read file",
+  "event": "Parallel validation enabled: 10,000 sequences across 4 workers",
   "process_id": 12345,
   "thread_id": 12345,
-  "worker_id": 1,
-  "file_context": "sample_1.fastq",
+  "parallel_mode": true,
+  "workers": 4,
+  "total_sequences": 10000,
   "level": "info",
-  "timestamp": "2025-10-28T14:32:45.123456Z",
+  "timestamp": "2025-10-30T14:32:45.123456Z",
   "logger": "bioinformatics_validator"
 }
 ```
