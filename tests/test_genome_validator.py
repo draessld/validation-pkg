@@ -60,6 +60,7 @@ class TestGenomeValidatorInitialization:
         """Test initialization with default settings."""
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -85,6 +86,7 @@ class TestGenomeValidatorInitialization:
 
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -164,6 +166,7 @@ class TestGenomeValidatorParsing:
         """Test parsing a simple FASTA file with two sequences."""
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -185,6 +188,7 @@ class TestGenomeValidatorParsing:
         """Test parsing a GenBank file."""
         genome_config = GenomeConfig(
             filename="genome.gbk",
+            basename="genome",
             filepath=simple_genbank,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.GENBANK,
@@ -202,6 +206,7 @@ class TestGenomeValidatorParsing:
         """Test that empty FASTA file raises GenomeValidationError."""
         genome_config = GenomeConfig(
             filename="empty.fasta",
+            basename="empty",
             filepath=empty_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -218,6 +223,7 @@ class TestGenomeValidatorParsing:
         """Test that invalid FASTA raises FastaFormatError."""
         genome_config = GenomeConfig(
             filename="invalid.fasta",
+            basename="invalid",
             filepath=invalid_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -272,6 +278,7 @@ class TestGenomeValidatorCompression:
         """Test parsing gzip compressed FASTA."""
         genome_config = GenomeConfig(
             filename="genome.fasta.gz",
+            basename="genome",
             filepath=compressed_fasta_gz,
             coding_type=CodingType.GZIP,
             detected_format=GenomeFormat.FASTA,
@@ -289,6 +296,7 @@ class TestGenomeValidatorCompression:
         """Test parsing bzip2 compressed FASTA."""
         genome_config = GenomeConfig(
             filename="genome.fasta.bz2",
+            basename="genome",
             filepath=compressed_fasta_bz2,
             coding_type=CodingType.BZIP2,
             detected_format=GenomeFormat.FASTA,
@@ -357,6 +365,7 @@ class TestGenomeValidatorValidation:
         """Test that empty sequences are rejected by default."""
         genome_config = GenomeConfig(
             filename="empty_seq.fasta",
+            basename="empty_seq",
             filepath=fasta_with_empty_sequence,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -403,6 +412,7 @@ class TestGenomeValidatorEditing:
 
         genome_config = GenomeConfig(
             filename="mixed_lengths.fasta",
+            basename="mixed_lengths",
             filepath=fasta_with_mixed_lengths,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -428,6 +438,7 @@ class TestGenomeValidatorEditing:
 
         genome_config = GenomeConfig(
             filename="mixed_lengths.fasta",
+            basename="mixed_lengths",
             filepath=fasta_with_mixed_lengths,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -494,6 +505,7 @@ class TestGenomeValidatorOutput:
 
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -515,6 +527,7 @@ class TestGenomeValidatorOutput:
 
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -540,6 +553,7 @@ class TestGenomeValidatorOutput:
 
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -565,6 +579,7 @@ class TestGenomeValidatorOutput:
 
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -584,6 +599,7 @@ class TestGenomeValidatorOutput:
 
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=simple_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -603,6 +619,7 @@ class TestGenomeValidatorOutput:
         """Test converting GenBank to FASTA output."""
         genome_config = GenomeConfig(
             filename="genome.gbk",
+            basename="genome",
             filepath=simple_genbank,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.GENBANK,
@@ -669,6 +686,7 @@ class TestGenomeValidatorPlasmidSplit:
         """Test that plasmids are split into individual files when more than 2 sequences present."""
         genome_config = GenomeConfig(
             filename="genome_plasmids.fasta",
+            basename="genome_plasmids",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -722,6 +740,7 @@ class TestGenomeValidatorPlasmidSplit:
         """Test that plasmid split can be disabled (warning issued but split doesn't happen)."""
         genome_config = GenomeConfig(
             filename="genome_plasmids.fasta",
+            basename="genome_plasmids",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -755,6 +774,7 @@ class TestGenomeValidatorPlasmidSplit:
         """Test that plasmid split IS triggered when 2 sequences >= warn_n_sequences threshold."""
         genome_config = GenomeConfig(
             filename="genome_two_seqs.fasta",
+            basename="genome_two_seqs",
             filepath=fasta_with_two_sequences,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -784,6 +804,7 @@ class TestGenomeValidatorPlasmidSplit:
         """Test plasmid split with custom output suffix."""
         genome_config = GenomeConfig(
             filename="genome_plasmids.fasta",
+            basename="genome_plasmids",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -814,6 +835,7 @@ class TestGenomeValidatorPlasmidSplit:
         """Test plasmid split with compressed output."""
         genome_config = GenomeConfig(
             filename="genome_plasmids.fasta",
+            basename="genome_plasmids",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -857,6 +879,7 @@ class TestGenomeValidatorPlasmidSplit:
         """Test plasmid split outputs to subdirectory."""
         genome_config = GenomeConfig(
             filename="genome_plasmids.fasta",
+            basename="genome_plasmids",
             filepath=fasta_with_plasmids,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -927,6 +950,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -951,6 +975,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="damaged.fasta",
+            basename="damaged",
             filepath=damaged_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -970,6 +995,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -995,6 +1021,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1018,6 +1045,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="damaged.fasta",
+            basename="damaged",
             filepath=damaged_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1039,6 +1067,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1069,6 +1098,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1089,6 +1119,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1119,6 +1150,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1142,6 +1174,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="damaged.fasta",
+            basename="damaged",
             filepath=damaged_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1163,6 +1196,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1188,6 +1222,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta",
+            basename="genome",
             filepath=multi_seq_fasta,
             coding_type=CodingType.NONE,
             detected_format=GenomeFormat.FASTA,
@@ -1224,6 +1259,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta.gz",
+            basename="genome",
             filepath=fasta_file,
             coding_type=CodingType.GZIP,
             detected_format=GenomeFormat.FASTA,
@@ -1248,6 +1284,7 @@ class TestGenomeValidatorValidationLevels:
         )
         genome_config = GenomeConfig(
             filename="genome.fasta.bz2",
+            basename="genome",
             filepath=fasta_file,
             coding_type=CodingType.BZIP2,
             detected_format=GenomeFormat.FASTA,

@@ -53,6 +53,7 @@ class GenomeConfig:
     """
     filename: str
     filepath: Path
+    basename: str = None
     coding_type: CodingType = None
     detected_format: GenomeFormat = None
     output_dir: Path = None
@@ -61,6 +62,13 @@ class GenomeConfig:
     def __post_init__(self):
         if self.global_options is None:
             self.global_options = {}
+
+        self.basename = self.filename
+        if self.coding_type:
+            self.basename = self.filename.rsplit('.',2)[0]
+        else:
+            self.basename = self.filename.rsplit('.',1)[0]
+
 
 @dataclass
 class ReadConfig:
@@ -74,10 +82,11 @@ class ReadConfig:
         coding_type: Compression format (GZIP, BZIP2, or NONE)
         detected_format: File format (FASTQ or BAM)
         output_dir: Base output directory from config
-        options: Merged global + file-level options (threads, validation_level only)
+        global_options: Merged global + file-level options (threads, validation_level only)
     """
     filename: str
     filepath: Path
+    basename: str = None
     ngs_type: str = None
     coding_type: CodingType = None
     detected_format: ReadFormat = None
@@ -89,6 +98,12 @@ class ReadConfig:
             raise ValueError(f"Invalid ngs_type: {self.ngs_type}")
         if self.global_options is None:
             self.global_options = {}
+
+        self.basename = self.filename
+        if self.coding_type:
+            self.basename = self.filename.rsplit('.',2)[0]
+        else:
+            self.basename = self.filename.rsplit('.',1)[0]
 
 @dataclass
 class FeatureConfig:
@@ -105,6 +120,7 @@ class FeatureConfig:
     """
     filename: str
     filepath: Path
+    basename: str = None
     coding_type: CodingType = None
     detected_format: FeatureFormat = None
     output_dir: Path = None
@@ -114,6 +130,11 @@ class FeatureConfig:
         if self.global_options is None:
             self.global_options = {}
 
+        self.basename = self.filename
+        if self.coding_type:
+            self.basename = self.filename.rsplit('.',2)[0]
+        else:
+            self.basename = self.filename.rsplit('.',1)[0]
 
 class Config:
     """
@@ -265,7 +286,6 @@ class ConfigManager:
             error_msg = f"Configuration validation failed: {e}"
             logger.error(error_msg)
             raise ConfigurationError(error_msg) from e
-        
 
     @staticmethod
     def _validate_required_fields(data: dict):
@@ -517,7 +537,6 @@ class ConfigManager:
             output_dir=output_dir,
             global_options=filelvl_options
         )
-
 
     @staticmethod
     def _parse_options(data: dict, config: Config):

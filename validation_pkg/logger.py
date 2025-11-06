@@ -11,14 +11,24 @@ import sys
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List
 from threading import Lock
+from dataclasses import dataclass
 import structlog
 from contextvars import ContextVar
 import logging
+import time
 
 # Context variable to track when parallel validation is active
 _parallel_validation_active: ContextVar[bool] = ContextVar('parallel_validation_active', default=False)
+
+
+@dataclass
+class FileTimingSummary:
+    """Simple timing summary for a single file."""
+    input_file: str
+    validator_type: str  # "genome", "read", "feature"
+    elapsed_time: float
 
 
 # ANSI color codes for console output
@@ -143,6 +153,14 @@ class ValidationLogger:
         # Store report file path
         self.report_file = None
 
+        # Storage for timing measurements
+        self._timers: Dict[str, float] = {}
+        self._timers_lock = Lock()
+
+        # Storage for per-file timing information
+        self.file_timings: List[FileTimingSummary] = []
+        self._timings_lock = Lock()
+
         self._initialized = True
 
     def setup(
@@ -168,6 +186,7 @@ class ValidationLogger:
         # Clear validation issues from previous runs (prevents contamination)
         if clear_previous_issues:
             self.clear_issues()
+            self.clear_file_timings()
 
         # Store report file path
         self.report_file = report_file
@@ -177,8 +196,13 @@ class ValidationLogger:
 
         # Setup stdlib logging first (if file logging is requested)
         if log_file:
+            from validation_pkg.utils.file_handler import get_incremented_path
+
             log_file = Path(log_file)
             log_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Auto-increment if file exists
+            log_file = get_incremented_path(log_file)
 
             # Use stdlib logging with structlog
             processors = [
@@ -202,7 +226,7 @@ class ValidationLogger:
             )
 
             # Setup stdlib logger for file and console output
-            stdlib_logger = logging.getLogger("bioinformatics_validator")
+            stdlib_logger = logging.getLogger("validation_pipeline")
             stdlib_logger.handlers.clear()  # Clear any existing handlers
             stdlib_logger.setLevel(logging.DEBUG)
             stdlib_logger.propagate = False
@@ -259,7 +283,7 @@ class ValidationLogger:
             )
 
         # Get logger instance
-        self.logger = structlog.get_logger("bioinformatics_validator")
+        self.logger = structlog.get_logger("validation_pipeline")
 
         if log_file:
             self.info(f"Detailed log file: {log_file}")
@@ -335,6 +359,84 @@ class ValidationLogger:
             else:
                 self.logger.info(log_message, **log_kwargs)
 
+    def start_timer(self, name: str):
+        """
+        Start a named timer for performance measurement (thread-safe).
+
+        Args:
+            name: Unique identifier for this timer
+
+        Example:
+            >>> logger = get_logger()
+            >>> logger.start_timer("validation")
+            >>> # do some work
+            >>> elapsed = logger.stop_timer("validation")
+        """
+        with self._timers_lock:
+            self._timers[name] = time.time()
+
+    def stop_timer(self, name: str) -> float:
+        """
+        Stop a named timer and return elapsed time in seconds (thread-safe).
+
+        Args:
+            name: Identifier for the timer to stop
+
+        Returns:
+            float: Elapsed time in seconds
+
+        Raises:
+            KeyError: If timer with given name was never started
+
+        Example:
+            >>> logger = get_logger()
+            >>> logger.start_timer("validation")
+            >>> # do some work
+            >>> elapsed = logger.stop_timer("validation")
+            >>> print(f"Took {elapsed:.2f}s")
+        """
+        end_time = time.time()
+        with self._timers_lock:
+            if name not in self._timers:
+                raise KeyError(f"Timer '{name}' was never started")
+            start_time = self._timers[name]
+            elapsed = end_time - start_time
+            # Store the elapsed time instead of start time
+            self._timers[name] = elapsed
+            return elapsed
+
+    def get_timers(self) -> Dict[str, float]:
+        """
+        Get all recorded timers (thread-safe).
+
+        Returns:
+            dict: Copy of timers dictionary with elapsed times
+        """
+        with self._timers_lock:
+            return self._timers.copy()
+
+    def add_file_timing(self, input_file: str, validator_type: str, elapsed_time: float):
+        """
+        Add file timing information (thread-safe).
+
+        Args:
+            input_file: Name of the input file
+            validator_type: Type of validator ("genome", "read", "feature")
+            elapsed_time: Time taken to process the file in seconds
+        """
+        timing = FileTimingSummary(
+            input_file=input_file,
+            validator_type=validator_type,
+            elapsed_time=elapsed_time
+        )
+        with self._timings_lock:
+            self.file_timings.append(timing)
+
+    def clear_file_timings(self):
+        """Clear all file timing information (thread-safe)."""
+        with self._timings_lock:
+            self.file_timings.clear()
+
     def generate_report(self):
         """
         Generate validation report and save to file (thread-safe).
@@ -345,9 +447,15 @@ class ValidationLogger:
         if not self.report_file:
             return None
 
-        # Copy issues list to avoid holding lock during file I/O
+        # Copy issues list, timers, and file timings to avoid holding lock during file I/O
         with self._issues_lock:
             issues_copy = self.validation_issues.copy()
+
+        with self._timers_lock:
+            timers_copy = self._timers.copy()
+
+        with self._timings_lock:
+            file_timings_copy = self.file_timings.copy()
 
         # Count issues by level
         errors = sum(1 for issue in issues_copy
@@ -368,9 +476,36 @@ class ValidationLogger:
             f"  Errors:   {errors}",
             f"  Warnings: {warnings}",
             "",
+        ]
+
+        # Add timing section if any timers were recorded
+        if timers_copy:
+            report_lines.extend([
+                "PERFORMANCE",
+                "-" * 80,
+            ])
+            for timer_name, elapsed_time in sorted(timers_copy.items()):
+                report_lines.append(f"  {timer_name}: {elapsed_time:.2f}s")
+            report_lines.append("")
+
+        # Add per-file timing section if any files were processed
+        if file_timings_copy:
+            report_lines.extend([
+                "FILES PROCESSED",
+                "-" * 80,
+            ])
+            for timing in file_timings_copy:
+                report_lines.append(
+                    f"  {timing.input_file:50s} | "
+                    f"{timing.validator_type.upper():8s} | "
+                    f"{timing.elapsed_time:6.2f}s"
+                )
+            report_lines.append("")
+
+        report_lines.extend([
             "DETAILS",
             "-" * 80,
-        ]
+        ])
 
         if not issues_copy:
             report_lines.append("✓ No issues found - all validations passed!")
@@ -389,11 +524,16 @@ class ValidationLogger:
 
         report_lines.append("\n" + "=" * 80)
 
-        report_content = "\n".join(report_lines)
+        # Ensure report ends with newline
+        report_content = "\n".join(report_lines) + "\n"
 
-        # Write to file
-        self.report_file.write_text(report_content, encoding='utf-8')
-        self.info(f"Validation report saved to: {self.report_file}")
+        # Auto-increment report file if exists
+        from validation_pkg.utils.file_handler import get_incremented_path
+        actual_report_file = get_incremented_path(self.report_file)
+
+        # Write to incremented file
+        actual_report_file.write_text(report_content, encoding='utf-8')
+        self.info(f"Validation report saved to: {actual_report_file}")
 
         return report_content
 

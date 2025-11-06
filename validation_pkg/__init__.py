@@ -131,15 +131,18 @@ def validate_genome(
 
     This is a simplified wrapper around GenomeValidator for easier usage.
 
+    Note: This function does NOT automatically generate a report. Call
+    logger.generate_report() manually after all validations are complete.
+
     Args:
         genome_config: GenomeConfig object (from ConfigManager)
         settings: Optional GenomeValidator.Settings object (uses defaults if None)
+
+    Returns:
+        dict: Empty dict (placeholder for future metadata)
     """
     validator = GenomeValidator(genome_config, settings)
-    validator.run()
-    logger = get_logger()
-    if logger.report_file is not None:
-        logger.generate_report()
+    return validator.run()
 
 def validate_read(
     read_config,
@@ -150,15 +153,16 @@ def validate_read(
 
     This is a simplified wrapper around ReadValidator for easier usage.
 
+    Note: This function does NOT automatically generate a report. Call
+    logger.generate_report() manually after all validations are complete.
+
     Args:
         read_config: ReadConfig object (from ConfigManager)
         settings: Optional ReadValidator.Settings object (uses defaults if None)
     """
     validator = ReadValidator(read_config, settings)
-    validator.run()
-    logger = get_logger()
-    if logger.report_file is not None:
-        logger.generate_report()
+    output_metadata = validator.run()
+    return output_metadata
 
 def validate_reads(
     read_configs: List,
@@ -242,16 +246,19 @@ def validate_feature(
 
     This is a simplified wrapper around FeatureValidator for easier usage.
 
+    Note: This function does NOT automatically generate a report. Call
+    logger.generate_report() manually after all validations are complete.
+
     Args:
         feature_config: FeatureConfig object (from ConfigManager)
         settings: Optional FeatureValidator.Settings object (uses defaults if None)
+
+    Returns:
+        dict: Empty dict (placeholder for future metadata)
     """
 
     validator = FeatureValidator(feature_config, settings)
-    validator.run()
-    logger = get_logger()
-    if logger.report_file is not None:
-        logger.generate_report()
+    return validator.run()
 
 def validate_features(
     feature_configs: List,

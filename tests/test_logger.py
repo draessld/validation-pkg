@@ -243,6 +243,7 @@ class TestParallelValidationLogging:
 
             config = ReadConfig(
                 filename=fastq_file.name,
+                basename="test",
                 filepath=fastq_file,
                 ngs_type="illumina",
                 coding_type=CodingType.NONE,
@@ -278,6 +279,7 @@ class TestParallelValidationLogging:
 
             config = ReadConfig(
                 filename=fastq_file.name,
+                basename="test",
                 filepath=fastq_file,
                 ngs_type="illumina",
                 coding_type=CodingType.NONE,
@@ -315,6 +317,7 @@ class TestParallelValidationLogging:
             threads = 8
             config = ReadConfig(
                 filename=fastq_file.name,
+                basename="test",
                 filepath=fastq_file,
                 ngs_type="illumina",
                 coding_type=CodingType.NONE,
@@ -351,6 +354,7 @@ class TestParallelValidationLogging:
 
             config = ReadConfig(
                 filename=fastq_file.name,
+                basename="test",
                 filepath=fastq_file,
                 ngs_type="illumina",
                 coding_type=CodingType.NONE,
@@ -422,6 +426,7 @@ class TestConditionalProcessID:
 
         config = ReadConfig(
             filename=fastq_file.name,
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -462,6 +467,7 @@ class TestConditionalProcessID:
 
         config = ReadConfig(
             filename=fastq_file.name,
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -503,6 +509,7 @@ class TestConditionalProcessID:
 
         config = ReadConfig(
             filename=fastq_file.name,
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -545,6 +552,7 @@ class TestConditionalProcessID:
 
         config = ReadConfig(
             filename=fastq_file.name,
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -585,6 +593,7 @@ class TestConditionalProcessID:
 
         config_seq = ReadConfig(
             filename=fastq_file.name,
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -605,6 +614,7 @@ class TestConditionalProcessID:
 
         config_par = ReadConfig(
             filename=fastq_file.name,
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -627,6 +637,293 @@ class TestConditionalProcessID:
         assert '"process_id"' in par_log
         # Verify parallel logging was cleaned up
         assert not logger.is_parallel_logging_enabled()
+
+
+class TestTimingMethods:
+    """Test suite for timing functionality."""
+
+    @pytest.fixture(autouse=True)
+    def reset_logger(self):
+        """Reset logger state before each test."""
+        logger = get_logger()
+        logger.clear_issues()
+        logger.logger = None
+        # Clear timers
+        with logger._timers_lock:
+            logger._timers.clear()
+        yield
+        logger.clear_issues()
+        with logger._timers_lock:
+            logger._timers.clear()
+
+    def test_start_stop_timer_basic(self):
+        """Test basic timer functionality."""
+        import time
+        logger = get_logger()
+        logger.setup()
+
+        logger.start_timer("test_operation")
+        time.sleep(0.1)  # Sleep for 100ms
+        elapsed = logger.stop_timer("test_operation")
+
+        # Should be approximately 0.1 seconds (allow some tolerance)
+        assert 0.09 < elapsed < 0.15, f"Expected ~0.1s, got {elapsed}s"
+
+    def test_stop_timer_without_start_raises_error(self):
+        """Test that stopping a non-existent timer raises KeyError."""
+        logger = get_logger()
+        logger.setup()
+
+        with pytest.raises(KeyError, match="Timer 'nonexistent' was never started"):
+            logger.stop_timer("nonexistent")
+
+    def test_multiple_timers_independent(self):
+        """Test that multiple named timers work independently."""
+        import time
+        logger = get_logger()
+        logger.setup()
+
+        # Start two timers
+        logger.start_timer("timer1")
+        time.sleep(0.05)
+        logger.start_timer("timer2")
+        time.sleep(0.05)
+
+        # Stop timer1 (should be ~0.1s)
+        elapsed1 = logger.stop_timer("timer1")
+        # Stop timer2 (should be ~0.05s)
+        elapsed2 = logger.stop_timer("timer2")
+
+        assert 0.09 < elapsed1 < 0.15, f"Timer1: expected ~0.1s, got {elapsed1}s"
+        assert 0.04 < elapsed2 < 0.08, f"Timer2: expected ~0.05s, got {elapsed2}s"
+
+    def test_get_timers_returns_copy(self):
+        """Test that get_timers returns a copy of timers dict."""
+        import time
+        logger = get_logger()
+        logger.setup()
+
+        logger.start_timer("test")
+        time.sleep(0.05)
+        logger.stop_timer("test")
+
+        timers = logger.get_timers()
+        assert "test" in timers
+        assert isinstance(timers, dict)
+
+        # Modifying the copy should not affect internal state
+        timers["test"] = 999.0
+        timers_again = logger.get_timers()
+        assert timers_again["test"] != 999.0
+
+    def test_timer_in_report(self):
+        """Test that timers appear in generated report."""
+        import time
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_file = Path(tmpdir) / "report.txt"
+            logger = get_logger()
+            logger.setup(report_file=report_file)
+
+            # Add a timer
+            logger.start_timer("genome_validation")
+            time.sleep(0.05)
+            logger.stop_timer("genome_validation")
+
+            # Generate report
+            logger.generate_report()
+
+            # Check report content
+            content = report_file.read_text()
+            assert "PERFORMANCE" in content
+            assert "genome_validation:" in content
+            assert "s" in content  # Should have seconds unit
+
+    def test_report_ends_with_newline(self):
+        """Test that generated report ends with a newline."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_file = Path(tmpdir) / "report.txt"
+            logger = get_logger()
+            logger.setup(report_file=report_file)
+
+            # Generate report (even empty report should end with newline)
+            logger.generate_report()
+
+            # Read file content
+            content = report_file.read_text()
+
+            # Should end with newline
+            assert content.endswith("\n"), "Report should end with newline"
+
+    def test_report_with_timers_and_issues(self):
+        """Test report generation with both timers and issues."""
+        import time
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_file = Path(tmpdir) / "report.txt"
+            logger = get_logger()
+            logger.setup(report_file=report_file)
+
+            # Add timer
+            logger.start_timer("read_validation")
+            time.sleep(0.05)
+            logger.stop_timer("read_validation")
+
+            # Add validation issue
+            logger.add_validation_issue(
+                level='WARNING',
+                category='read',
+                message='Test warning',
+                details={'file': 'test.fastq'}
+            )
+
+            # Generate report
+            logger.generate_report()
+
+            # Check report content
+            content = report_file.read_text()
+            assert "PERFORMANCE" in content
+            assert "read_validation:" in content
+            assert "DETAILS" in content
+            assert "Test warning" in content
+            assert content.endswith("\n")
+
+
+class TestFileAutoIncrement:
+    """Test suite for log and report file auto-increment functionality."""
+
+    @pytest.fixture(autouse=True)
+    def reset_logger(self):
+        """Reset logger state before each test."""
+        logger = get_logger()
+        logger.clear_issues()
+        logger.logger = None
+        with logger._timers_lock:
+            logger._timers.clear()
+        yield
+        logger.clear_issues()
+        with logger._timers_lock:
+            logger._timers.clear()
+
+    def test_log_file_auto_increment(self):
+        """Test that log files auto-increment instead of overwriting."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "validation.log"
+
+            # First setup - should create validation.log
+            logger1 = get_logger()
+            logger1.setup(log_file=log_file)
+            logger1.info("First run")
+
+            assert log_file.exists()
+            first_content = log_file.read_text()
+            assert "First run" in first_content
+
+            # Reset logger
+            logger1.logger = None
+            logger1.clear_issues()
+
+            # Second setup - should create validation_001.log
+            logger2 = get_logger()
+            logger2.setup(log_file=log_file)
+            logger2.info("Second run")
+
+            log_file_001 = Path(tmpdir) / "validation_001.log"
+            assert log_file_001.exists()
+            second_content = log_file_001.read_text()
+            assert "Second run" in second_content
+
+            # Original file should still have first content
+            first_content_after = log_file.read_text()
+            assert "First run" in first_content_after
+            assert "Second run" not in first_content_after
+
+    def test_report_file_auto_increment(self):
+        """Test that report files auto-increment instead of overwriting."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_file = Path(tmpdir) / "report.txt"
+
+            # First report
+            logger = get_logger()
+            logger.setup(report_file=report_file)
+            logger.add_validation_issue('WARNING', 'test', 'First warning')
+            logger.generate_report()
+
+            assert report_file.exists()
+            first_content = report_file.read_text()
+            assert "First warning" in first_content
+
+            # Clear and add different issue
+            logger.clear_issues()
+            logger.add_validation_issue('ERROR', 'test', 'Second error')
+
+            # Second report generation - should create report_001.txt
+            logger.generate_report()
+
+            report_file_001 = Path(tmpdir) / "report_001.txt"
+            assert report_file_001.exists()
+            second_content = report_file_001.read_text()
+            assert "Second error" in second_content
+
+            # Original file should still have first content
+            first_content_after = report_file.read_text()
+            assert "First warning" in first_content_after
+            assert "Second error" not in first_content_after
+
+    def test_multiple_increments(self):
+        """Test that multiple increments work correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_file = Path(tmpdir) / "report.txt"
+
+            logger = get_logger()
+            logger.setup(report_file=report_file)
+
+            # Generate 5 reports
+            for i in range(5):
+                logger.clear_issues()
+                logger.add_validation_issue('INFO', 'test', f'Report {i}')
+                logger.generate_report()
+
+            # Should have report.txt, report_001.txt through report_004.txt
+            assert report_file.exists()
+            assert (Path(tmpdir) / "report_001.txt").exists()
+            assert (Path(tmpdir) / "report_002.txt").exists()
+            assert (Path(tmpdir) / "report_003.txt").exists()
+            assert (Path(tmpdir) / "report_004.txt").exists()
+
+            # Verify each has correct content
+            for i in range(5):
+                if i == 0:
+                    path = report_file
+                else:
+                    path = Path(tmpdir) / f"report_{i:03d}.txt"
+                content = path.read_text()
+                assert f"Report {i}" in content
+
+    def test_log_and_report_increment_independently(self):
+        """Test that log and report files increment independently."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "validation.log"
+            report_file = Path(tmpdir) / "report.txt"
+
+            # First setup with both log and report
+            logger1 = get_logger()
+            logger1.setup(log_file=log_file, report_file=report_file)
+            logger1.info("Run 1")
+            logger1.add_validation_issue('INFO', 'test', 'Issue 1')
+            logger1.generate_report()
+
+            # Reset and second setup
+            logger1.logger = None
+            logger1.clear_issues()
+
+            logger2 = get_logger()
+            logger2.setup(log_file=log_file, report_file=report_file)
+            logger2.info("Run 2")
+            logger2.add_validation_issue('INFO', 'test', 'Issue 2')
+            logger2.generate_report()
+
+            # Both should have incremented versions
+            assert (Path(tmpdir) / "validation_001.log").exists()
+            assert (Path(tmpdir) / "report_001.txt").exists()
 
 
 if __name__ == "__main__":

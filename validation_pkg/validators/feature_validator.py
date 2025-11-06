@@ -39,6 +39,13 @@ from validation_pkg.utils.formats import CodingType as CT
 from validation_pkg.utils.formats import FeatureFormat
 from validation_pkg.utils.file_handler import open_compressed_writer
 
+
+@dataclass
+class OutputMetadata:
+    """Metadata returned from feature validation (placeholder for future expansion)."""
+    pass
+
+
 @dataclass
 class Feature:
     """
@@ -180,15 +187,19 @@ class FeatureValidator:
         if not self.threads:
             self.threads = 1    #   default global value
 
-    def run(self) -> None:
+    def run(self) -> dict:
         """
         Main validation and processing workflow.
 
         Uses feature_config data (format, compression) provided by ConfigManager.
 
+        Returns:
+            dict: Empty dict (placeholder for future metadata)
+
         Raises:
             FeatureValidationError: If validation fails
         """
+        self.logger.start_timer("feature_validation")
         self.logger.info(f"Processing feature file: {self.feature_config.filename}")
         self.logger.debug(f"Format: {self.feature_config.detected_format}, Compression: {self.feature_config.coding_type}")
 
@@ -203,11 +214,21 @@ class FeatureValidator:
 
             self._save_output()
 
-            self.logger.info(f"✓ Feature validation completed")
+            elapsed = self.logger.stop_timer("feature_validation")
+            self.logger.info(f"✓ Feature validation completed in {elapsed:.2f}s")
+
+            # Record file timing for report
+            self.logger.add_file_timing(
+                self.feature_config.filename,
+                "feature",
+                elapsed
+            )
 
         except Exception as e:
             self.logger.error(f"Feature validation failed: {e}")
             raise
+
+        return {}
 
     def _open_file(self, mode: str = 'rt') -> IO:
         """

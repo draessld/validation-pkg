@@ -20,14 +20,16 @@ Classes:
 """
 
 from pathlib import Path
-from typing import Optional, List, IO, Union
-from dataclasses import dataclass
+from typing import Optional, List, IO, Union, Dict, Any
+from dataclasses import dataclass, asdict
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import shutil
 from multiprocessing import Pool
 from functools import partial
+import re
+
 
 from validation_pkg.logger import get_logger
 from validation_pkg.utils.settings import BaseSettings
@@ -163,6 +165,21 @@ class ReadValidator:
         output_subdir_name: Optional[str] = None
         outdir_by_ngs_type: bool = False
 
+    @dataclass
+    class OutputMetadata:
+        """
+        Metadata returned from read validation.
+
+        Attributes:
+            pairing_info: Illumina paired-end pattern detection result
+                Contains: {'base_name': str, 'read_number': int, 'pattern': str} or None
+            ngs_type_detected: NGS platform type from read header
+            # Future fields can be added here without breaking changes
+        """
+        base_name: str = None
+        read_number: int = None
+        ngs_type_detected: str = None
+
     def __init__(self, read_config, settings: Optional[Settings] = None) -> None:
         """
         Initialize read validator.
@@ -184,11 +201,11 @@ class ReadValidator:
 
         # From settings
         self.settings = settings if not None else self.Settings() 
+        self.output_metadata = self.OutputMetadata()
 
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
 
-        print("post init")
         if not self.validation_level:
             self.validation_level = 'strict'    #   default global value
 
@@ -201,7 +218,7 @@ class ReadValidator:
             self.settings = self.settings.update(output_subdir_name=self.read_config.ngs_type)
             self.logger.debug(f"Applied outdir_by_ngs_type: output_subdir_name set to '{self.read_config.ngs_type}'")
 
-    def run(self) -> None:
+    def run(self) -> OutputMetadata:
         """
         Main validation and processing workflow.
 
@@ -214,6 +231,7 @@ class ReadValidator:
         Raises:
             ReadValidationError: If validation fails
         """
+        self.logger.start_timer("read_validation")
         self.logger.info(f"Processing read file: {self.read_config.filename}")
         self.logger.debug(f"Format: {self.read_config.detected_format}, Compression: {self.read_config.coding_type}")
 
@@ -238,7 +256,7 @@ class ReadValidator:
                 self._apply_edits()
 
                 # Step 6: Save FASTQ output
-                output_path = self._save_output()
+                self._save_output()
 
             else:
                 # Standard FASTQ workflow
@@ -247,18 +265,32 @@ class ReadValidator:
 
                 # Validate sequences
                 self._validate_sequences()
-                
+
                 # Step 2: Apply editing specifications
                 self._apply_edits()
+
+                # Step 3: If ilumina, detect file read number and basename
+                if self.read_config.ngs_type == 'illumina':
+                    self._detect_illumina_pattern(self.read_config.filename)
 
                 # Step 4: Save to output directory (already FASTQ)
                 self._save_output()
 
-            self.logger.info(f"✓ Read validation completed")
+            elapsed = self.logger.stop_timer("read_validation")
+            self.logger.info(f"✓ Read validation completed in {elapsed:.2f}s")
+
+            # Record file timing for report
+            self.logger.add_file_timing(
+                self.read_config.filename,
+                "read",
+                elapsed
+            )
 
         except Exception as e:
             self.logger.error(f"Read validation failed: {e}")
             raise
+
+        return asdict(self.output_metadata)
 
     def _open_file(self, mode: str = 'rt') -> IO:
         """
@@ -955,7 +987,13 @@ class ReadValidator:
 
         # Generate output filename from original filename (without compression extension)
         # Get base name without any extensions
-        base_name = self.read_config.filename
+        if self.output_metadata.base_name and self.output_metadata.read_number:
+            # Paired-end detected: use detected base name with R1/R2 suffix
+            base_name = f"{self.output_metadata.base_name}_R{self.output_metadata.read_number}"
+        else:
+            # Single-end (no pattern detected): use basename with _R1 suffix
+            # This ensures all Illumina reads have consistent _R1 or _R2 naming
+            base_name = f"{self.read_config.basename}_R1"
 
         # Remove all suffixes (.fastq.gz -> remove .gz then .fastq)
         for suffix in self.input_path.suffixes:
@@ -1094,3 +1132,65 @@ class ReadValidator:
 
         return output_path
     
+    def _detect_illumina_pattern(self, filename: str) -> None:
+        """
+        Detect Illumina paired-end naming patterns in filename.
+
+        Supports common Illumina naming conventions:
+        - _R1, _R2 (standard Illumina)
+        - _1, _2 (SRA/NCBI style)
+        - .R1, .R2 (dot separator)
+        - .1, .2 (dot separator)
+        - _R1_001, _R2_001 (with lane numbers)
+        - R1, R2 (no separator, at end of basename)
+
+        Args:
+            filename: Input filename (with or without extension)
+        """
+
+        # Strip only the last 2 extensions (format + compression)
+        base = self.read_config.basename
+
+        # Define patterns in priority order (most specific first)
+        # Pattern format: (regex, read_number_group_index)
+        patterns = [
+            # With lane numbers: _R1_001, _R2_001
+            (r'(.+)_(R[12])_\d+$', 2),
+            # With lane numbers: _1_001, _2_001
+            (r'(.+)_([12])_\d+$', 2),
+            # With arbitrary suffix: _R1_combined, _R2_final
+            (r'(.+)_(R[12])_[A-Za-z0-9_]+$', 2),
+            # With arbitrary suffix (no R prefix): _1_combined, _2_final
+            (r'(.+)_([12])_[A-Za-z0-9_]+$', 2),
+            # No separator with suffix: sampleR1_combined
+            (r'(.+)(R[12])_[A-Za-z0-9_]+$', 2),
+            # Standard Illumina: _R1, _R2
+            (r'(.+)_(R[12])$', 2),
+            # SRA style: _1, _2
+            (r'(.+)_([12])$', 2),
+            # Dot separator: .R1, .R2
+            (r'(.+)\.(R[12])$', 2),
+            # Dot with numbers: .1, .2
+            (r'(.+)\.([12])$', 2),
+            # No separator (must be at end): sampleR1, sampleR2
+            (r'(.+)(R[12])$', 2),
+        ]
+
+        for pattern, read_group_idx in patterns:
+            match = re.match(pattern, base)
+            if match:
+                base_name = match.group(1)
+                read_indicator = match.group(read_group_idx)
+
+                # Extract read number (1 or 2)
+                if read_indicator in ('R1', '1'):
+                    read_number = 1
+                elif read_indicator in ('R2', '2'):
+                    read_number = 2
+                else:
+                    continue  # Should not happen with our patterns
+
+                self.output_metadata.base_name = base_name
+                self.output_metadata.read_number = read_number
+                self.output_metadata.ngs_type_detected = 'illumina'
+                break  # Stop after first match

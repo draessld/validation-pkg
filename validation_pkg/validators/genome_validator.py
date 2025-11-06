@@ -38,6 +38,12 @@ from validation_pkg.exceptions import (
 from validation_pkg.utils.file_handler import open_compressed_writer
 
 
+@dataclass
+class OutputMetadata:
+    """Metadata returned from genome validation (placeholder for future expansion)."""
+    pass
+
+
 class GenomeValidator:
     """
     Validates and processes genome files in FASTA and GenBank formats.
@@ -163,15 +169,19 @@ class GenomeValidator:
         if not self.threads:
             self.threads = 1    #   default global value
 
-    def run(self) -> None:
+    def run(self) -> dict:
         """
         Main validation and processing workflow.
 
         Uses genome_config data (format, compression) provided by ConfigManager.
 
+        Returns:
+            dict: Empty dict (placeholder for future metadata)
+
         Raises:
             GenomeValidationError: If validation fails
         """
+        self.logger.start_timer("genome_validation")
         self.logger.info(f"Processing genome file: {self.genome_config.filename}")
         self.logger.debug(f"Format: {self.genome_config.detected_format}, Compression: {self.genome_config.coding_type}")
 
@@ -186,11 +196,21 @@ class GenomeValidator:
 
             self._save_output()
 
-            self.logger.info(f"✓ Genome validation completed")
+            elapsed = self.logger.stop_timer("genome_validation")
+            self.logger.info(f"✓ Genome validation completed in {elapsed:.2f}s")
+
+            # Record file timing for report
+            self.logger.add_file_timing(
+                self.genome_config.filename,
+                "genome",
+                elapsed
+            )
 
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")
             raise
+
+        return {}
 
     def _open_file(self, mode: str = 'rt') -> IO:
         """

@@ -62,6 +62,7 @@ class TestReadValidatorInitialization:
         """Test initialization with default settings."""
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -88,6 +89,7 @@ class TestReadValidatorInitialization:
 
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -154,6 +156,7 @@ class TestReadValidatorParsing:
         """Test parsing a simple FASTQ file."""
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -174,6 +177,7 @@ class TestReadValidatorParsing:
         """Test that empty FASTQ file raises ReadValidationError."""
         read_config = ReadConfig(
             filename="empty.fastq",
+            basename="empty",
             filepath=empty_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -191,6 +195,7 @@ class TestReadValidatorParsing:
         """Test that invalid FASTQ raises FastqFormatError."""
         read_config = ReadConfig(
             filename="invalid.fastq",
+            basename="invalid",
             filepath=invalid_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -245,6 +250,7 @@ class TestReadValidatorCompression:
         """Test parsing gzip compressed FASTQ."""
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=compressed_fastq_gz,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
@@ -263,6 +269,7 @@ class TestReadValidatorCompression:
         """Test parsing bzip2 compressed FASTQ."""
         read_config = ReadConfig(
             filename="reads.fastq.bz2",
+            basename="reads",
             filepath=compressed_fastq_bz2,
             ngs_type="illumina",
             coding_type=CodingType.BZIP2,
@@ -322,6 +329,7 @@ class TestReadValidatorValidation:
         """Test that duplicate IDs are allowed by default."""
         read_config = ReadConfig(
             filename="duplicates.fastq",
+            basename="duplicates",
             filepath=fastq_with_duplicates,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -342,6 +350,7 @@ class TestReadValidatorValidation:
 
         read_config = ReadConfig(
             filename="duplicates.fastq",
+            basename="duplicates",
             filepath=fastq_with_duplicates,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -361,6 +370,7 @@ class TestReadValidatorValidation:
 
         read_config = ReadConfig(
             filename="invalid_chars.fastq",
+            basename="invalid_chars",
             filepath=fastq_with_invalid_chars,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -378,6 +388,7 @@ class TestReadValidatorValidation:
         """Test that invalid characters are ignored by default."""
         read_config = ReadConfig(
             filename="invalid_chars.fastq",
+            basename="invalid_chars",
             filepath=fastq_with_invalid_chars,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -474,6 +485,7 @@ class TestReadValidatorOutput:
 
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -496,6 +508,7 @@ class TestReadValidatorOutput:
 
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -522,6 +535,7 @@ class TestReadValidatorOutput:
 
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -548,6 +562,7 @@ class TestReadValidatorOutput:
 
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -568,6 +583,7 @@ class TestReadValidatorOutput:
 
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -614,6 +630,7 @@ class TestReadValidatorNGSTypes:
         """Test processing Illumina reads."""
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -631,6 +648,7 @@ class TestReadValidatorNGSTypes:
         """Test processing Oxford Nanopore reads."""
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="ont",
             coding_type=CodingType.NONE,
@@ -648,6 +666,7 @@ class TestReadValidatorNGSTypes:
         """Test processing PacBio reads."""
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=simple_fastq,
             ngs_type="pacbio",
             coding_type=CodingType.NONE,
@@ -706,6 +725,7 @@ class TestReadValidatorValidationLevels:
         settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
@@ -729,6 +749,7 @@ class TestReadValidatorValidationLevels:
         )
         read_config = ReadConfig(
             filename="damaged.fastq",
+            basename="damaged",
             filepath=damaged_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -750,6 +771,7 @@ class TestReadValidatorValidationLevels:
         settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
@@ -773,6 +795,7 @@ class TestReadValidatorValidationLevels:
         )
         read_config = ReadConfig(
             filename="damaged.fastq",
+            basename="damaged",
             filepath=damaged_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -794,6 +817,7 @@ class TestReadValidatorValidationLevels:
         settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
@@ -818,6 +842,7 @@ class TestReadValidatorValidationLevels:
         )
         read_config = ReadConfig(
             filename="damaged.fastq",
+            basename="damaged",
             filepath=damaged_fastq,
             ngs_type="illumina",
             coding_type=CodingType.NONE,  # Uncompressed - doesn't match output coding
@@ -836,6 +861,7 @@ class TestReadValidatorValidationLevels:
         settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=multi_read_fastq,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
@@ -870,6 +896,7 @@ class TestReadValidatorValidationLevels:
         settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.GZIP,
@@ -900,6 +927,7 @@ class TestReadValidatorValidationLevels:
         settings = ReadValidator.Settings(coding_type='gz')
         read_config = ReadConfig(
             filename="reads.fastq.bz2",
+            basename="reads",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.BZIP2,
@@ -961,6 +989,7 @@ class TestReadValidatorEdgeCases:
         """Test handling reads of varying lengths."""
         read_config = ReadConfig(
             filename="varying.fastq",
+            basename="varying",
             filepath=fastq_with_varying_lengths,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -983,6 +1012,7 @@ class TestReadValidatorEdgeCases:
         """Test handling reads with low quality scores."""
         read_config = ReadConfig(
             filename="low_quality.fastq",
+            basename="low_quality",
             filepath=fastq_with_low_quality,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1018,6 +1048,7 @@ class TestSecurityCommandInjection:
         # Create read config
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=fastq_file,
             ngs_type='illumina',
             coding_type=CodingType.GZIP,
@@ -1050,6 +1081,7 @@ class TestSecurityCommandInjection:
         # Create read config
         read_config = ReadConfig(
             filename="reads.fastq.bz2",
+            basename="reads",
             filepath=fastq_file,
             ngs_type='ont',
             coding_type=CodingType.BZIP2,
@@ -1081,6 +1113,7 @@ class TestSecurityCommandInjection:
         # Create read config
         read_config = ReadConfig(
             filename="reads.fastq",
+            basename="reads",
             filepath=fastq_file,
             ngs_type='illumina',
             coding_type=CodingType.NONE,
@@ -1119,6 +1152,7 @@ class TestSecurityCommandInjection:
         # Create read config
         read_config = ReadConfig(
             filename="reads.fastq.gz",
+            basename="reads",
             filepath=fastq_file,
             ngs_type='illumina',
             coding_type=CodingType.GZIP,
@@ -1198,6 +1232,7 @@ class TestParallelValidationLogging:
 
         read_config = ReadConfig(
             filename="test.fastq",
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1234,6 +1269,7 @@ class TestParallelValidationLogging:
 
         read_config = ReadConfig(
             filename="test.fastq",
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1270,6 +1306,7 @@ class TestParallelValidationLogging:
 
         read_config = ReadConfig(
             filename="test.fastq",
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1316,6 +1353,7 @@ class TestParallelValidationLogging:
 
         read_config = ReadConfig(
             filename="invalid.fastq",
+            basename="invalid",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1352,6 +1390,7 @@ class TestParallelValidationLogging:
 
         read_config = ReadConfig(
             filename="test.fastq",
+            basename="test",
             filepath=fastq_file,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1395,6 +1434,7 @@ class TestParallelValidationLogging:
         # First validation (parallel)
         read_config1 = ReadConfig(
             filename="test1.fastq",
+            basename="test1",
             filepath=fastq_file1,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1413,6 +1453,7 @@ class TestParallelValidationLogging:
         # Second validation (sequential)
         read_config2 = ReadConfig(
             filename="test2.fastq",
+            basename="test2",
             filepath=fastq_file2,
             ngs_type="illumina",
             coding_type=CodingType.NONE,
@@ -1427,6 +1468,441 @@ class TestParallelValidationLogging:
 
         # Should still be disabled
         assert not logger.is_parallel_logging_enabled()
+
+
+class TestIlluminaPatternDetection:
+    """Test Illumina paired-end filename pattern detection."""
+
+    def _create_validator_with_basename(self, filename):
+        """
+        Helper to create validator with mock read_config containing basename.
+
+        The basename is calculated the same way as ReadConfig.__post_init__():
+        - If compressed: strip last 2 extensions (format + compression)
+        - If uncompressed: strip last 1 extension (format only)
+        """
+        from pathlib import Path
+        from unittest.mock import Mock
+
+        suffixes = Path(filename).suffixes
+        compression_exts = {'.gz', '.gzip', '.bz2', '.bzip2'}
+        has_compression = any(s.lower() in compression_exts for s in suffixes)
+
+        if has_compression:
+            # Strip last 2 extensions: format + compression
+            basename = filename.rsplit('.', 2)[0]
+        else:
+            # Strip last 1 extension: format only
+            basename = filename.rsplit('.', 1)[0] if '.' in filename else filename
+
+        validator = ReadValidator.__new__(ReadValidator)
+        validator.output_metadata = ReadValidator.OutputMetadata()
+        validator.read_config = Mock()
+        validator.read_config.basename = basename
+
+        return validator
+
+    # ==================== User-Provided Examples (12 files) ====================
+
+    def test_standard_illumina_with_sample_and_lane(self):
+        """Test Illumina filenames with sample ID and lane numbers (S1_L001_R1/R2 format)."""
+        # Bacillus_toyonensis_LE1_S1_L001_R1.fastq.gz
+        validator = self._create_validator_with_basename("Bacillus_toyonensis_LE1_S1_L001_R1.fastq.gz")
+
+        validator._detect_illumina_pattern("Bacillus_toyonensis_LE1_S1_L001_R1.fastq.gz")
+        assert validator.output_metadata.base_name == "Bacillus_toyonensis_LE1_S1_L001"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # Bacillus_toyonensis_LE1_S1_L001_R2.fastq.gz
+        validator2 = self._create_validator_with_basename("Bacillus_toyonensis_LE1_S1_L001_R2.fastq.gz")
+        validator2._detect_illumina_pattern("Bacillus_toyonensis_LE1_S1_L001_R2.fastq.gz")
+        assert validator2.output_metadata.base_name == "Bacillus_toyonensis_LE1_S1_L001"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_hyphenated_names_with_underscore_numbers(self):
+        """Test filenames with hyphens and _1/_2 suffix (no R prefix)."""
+        # Bacillus-toyonensis-LE1-sequence_1.fastq.gz
+        validator = self._create_validator_with_basename("Bacillus-toyonensis-LE1-sequence_1.fastq.gz")
+
+        validator._detect_illumina_pattern("Bacillus-toyonensis-LE1-sequence_1.fastq.gz")
+        assert validator.output_metadata.base_name == "Bacillus-toyonensis-LE1-sequence"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # Bacillus-toyonensis-LE1-sequence_2.fastq.gz
+        validator2 = self._create_validator_with_basename("Bacillus-toyonensis-LE1-sequence_2.fastq.gz")
+        validator2._detect_illumina_pattern("Bacillus-toyonensis-LE1-sequence_2.fastq.gz")
+        assert validator2.output_metadata.base_name == "Bacillus-toyonensis-LE1-sequence"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_dot_separator_style(self):
+        """Test filenames with dot separator (.R1 style)."""
+        # Bacillus_toyonensis_LE1_sequence.R1.fastq.gz
+        validator = self._create_validator_with_basename("Bacillus_toyonensis_LE1_sequence.R1.fastq.gz")
+
+        validator._detect_illumina_pattern("Bacillus_toyonensis_LE1_sequence.R1.fastq.gz")
+        assert validator.output_metadata.base_name == "Bacillus_toyonensis_LE1_sequence"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+    def test_single_end_no_pattern(self):
+        """Test single-end files without paired-end indicators."""
+        # SRR834393.fq.gz (no R1/R2 or _1/_2 indicator)
+        validator = self._create_validator_with_basename("SRR834393.fq.gz")
+
+        validator._detect_illumina_pattern("SRR834393.fq.gz")
+        # No pattern should be detected - metadata should remain None
+        assert validator.output_metadata.base_name is None
+        assert validator.output_metadata.read_number is None
+        assert validator.output_metadata.ngs_type_detected is None
+
+    def test_sra_style_underscore_suffix(self):
+        """Test SRA-style filenames with _1/_2 suffix."""
+        # SRR834394_1.fq.gz
+        validator = self._create_validator_with_basename("SRR834394_1.fq.gz")
+
+        validator._detect_illumina_pattern("SRR834394_1.fq.gz")
+        assert validator.output_metadata.base_name == "SRR834394"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # SRR837394_1.fastq.gz
+        validator2 = self._create_validator_with_basename("SRR837394_1.fastq.gz")
+        validator2._detect_illumina_pattern("SRR837394_1.fastq.gz")
+        assert validator2.output_metadata.base_name == "SRR837394"
+        assert validator2.output_metadata.read_number == 1
+
+    def test_lane_numbers_without_r_prefix(self):
+        """Test filenames with _1_001 and _2_001 patterns (lane numbers without R prefix)."""
+        # SRR837394_1_001.fastq.gz
+        validator = self._create_validator_with_basename("SRR837394_1_001.fastq.gz")
+
+        validator._detect_illumina_pattern("SRR837394_1_001.fastq.gz")
+        assert validator.output_metadata.base_name == "SRR837394"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # SRR837394_2_001.fastq.gz
+        validator2 = self._create_validator_with_basename("SRR837394_2_001.fastq.gz")
+        validator2._detect_illumina_pattern("SRR837394_2_001.fastq.gz")
+        assert validator2.output_metadata.base_name == "SRR837394"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_no_separator_r_prefix(self):
+        """Test filenames with R1/R2 directly attached (no separator)."""
+        # SRR834393R1_combined.fq.gz
+        validator = self._create_validator_with_basename("SRR834393R1_combined.fq.gz")
+
+        validator._detect_illumina_pattern("SRR834393R1_combined.fq.gz")
+        assert validator.output_metadata.base_name == "SRR834393"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # SRR834393R2_combined.fq.gz
+        validator2 = self._create_validator_with_basename("SRR834393R2_combined.fq.gz")
+        validator2._detect_illumina_pattern("SRR834393R2_combined.fq.gz")
+        assert validator2.output_metadata.base_name == "SRR834393"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_complex_basename_with_suffix(self):
+        """Test complex filenames like Trichoderma_illumina_ABE_R1_combined.fastq.gz"""
+        # Trichoderma_illumina_ABE_R1_combined.fastq.gz
+        validator = self._create_validator_with_basename("Trichoderma_illumina_ABE_R1_combined.fastq.gz")
+
+        validator._detect_illumina_pattern("Trichoderma_illumina_ABE_R1_combined.fastq.gz")
+        assert validator.output_metadata.base_name == "Trichoderma_illumina_ABE"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # Trichoderma_illumina_ABE_R2_combined.fastq.gz
+        validator2 = self._create_validator_with_basename("Trichoderma_illumina_ABE_R2_combined.fastq.gz")
+        validator2._detect_illumina_pattern("Trichoderma_illumina_ABE_R2_combined.fastq.gz")
+        assert validator2.output_metadata.base_name == "Trichoderma_illumina_ABE"
+        assert validator2.output_metadata.read_number == 2
+
+    # ==================== Pattern Coverage Tests ====================
+
+    def test_standard_r_prefix_patterns(self):
+        """Test standard _R1/_R2 patterns (most common)."""
+        # Basic _R1 pattern
+        validator = self._create_validator_with_basename("sample_R1.fastq.gz")
+        validator._detect_illumina_pattern("sample_R1.fastq.gz")
+        assert validator.output_metadata.base_name == "sample"
+        assert validator.output_metadata.read_number == 1
+
+        # Basic _R2 pattern
+        validator2 = self._create_validator_with_basename("sample_R2.fastq.gz")
+        validator2._detect_illumina_pattern("sample_R2.fastq.gz")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_lane_number_patterns_with_r_prefix(self):
+        """Test _R1_001/_R2_001 patterns (Illumina lane numbers)."""
+        # _R1_001 pattern
+        validator = self._create_validator_with_basename("sample_R1_001.fastq.gz")
+        validator._detect_illumina_pattern("sample_R1_001.fastq.gz")
+        assert validator.output_metadata.base_name == "sample"
+        assert validator.output_metadata.read_number == 1
+
+        # _R2_999 pattern (any digits)
+        validator2 = self._create_validator_with_basename("sample_R2_999.fastq.gz")
+        validator2._detect_illumina_pattern("sample_R2_999.fastq.gz")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_arbitrary_suffix_patterns(self):
+        """Test _R1_<suffix> patterns (arbitrary text after R1/R2)."""
+        # _R1_combined pattern
+        validator = self._create_validator_with_basename("sample_R1_combined.fastq.gz")
+        validator._detect_illumina_pattern("sample_R1_combined.fastq.gz")
+        assert validator.output_metadata.base_name == "sample"
+        assert validator.output_metadata.read_number == 1
+
+        # _R2_final pattern
+        validator2 = self._create_validator_with_basename("sample_R2_final.fastq.gz")
+        validator2._detect_illumina_pattern("sample_R2_final.fastq.gz")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 2
+
+        # _R1_merged_v2 pattern (complex suffix)
+        validator3 = self._create_validator_with_basename("sample_R1_merged_v2.fastq.gz")
+        validator3._detect_illumina_pattern("sample_R1_merged_v2.fastq.gz")
+        assert validator3.output_metadata.base_name == "sample"
+        assert validator3.output_metadata.read_number == 1
+
+    def test_arbitrary_suffix_patterns_no_r_prefix(self):
+        """Test _1_<suffix> and _2_<suffix> patterns (no R prefix, with arbitrary suffix)."""
+        # _1_combined pattern
+        validator = self._create_validator_with_basename("SRR837394_1_combined.fastq.gz")
+        validator._detect_illumina_pattern("SRR837394_1_combined.fastq.gz")
+        assert validator.output_metadata.base_name == "SRR837394"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == "illumina"
+
+        # _2_combined pattern
+        validator2 = self._create_validator_with_basename("SRR837394_2_combined.fastq.gz")
+        validator2._detect_illumina_pattern("SRR837394_2_combined.fastq.gz")
+        assert validator2.output_metadata.base_name == "SRR837394"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_dot_separator_with_numbers(self):
+        """Test .1/.2 patterns (dot separator without R prefix)."""
+        # .1 pattern
+        validator = self._create_validator_with_basename("sample.1.fastq.gz")
+        validator._detect_illumina_pattern("sample.1.fastq.gz")
+        assert validator.output_metadata.base_name == "sample"
+        assert validator.output_metadata.read_number == 1
+
+        # .2 pattern
+        validator2 = self._create_validator_with_basename("sample.2.fastq.gz")
+        validator2._detect_illumina_pattern("sample.2.fastq.gz")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_no_separator_numbers(self):
+        """Test R1/R2 directly attached to basename (no separator)."""
+        # sampleR1 pattern
+        validator = self._create_validator_with_basename("sampleR1.fastq.gz")
+        validator._detect_illumina_pattern("sampleR1.fastq.gz")
+        assert validator.output_metadata.base_name == "sample"
+        assert validator.output_metadata.read_number == 1
+
+        # sampleR2 pattern
+        validator2 = self._create_validator_with_basename("sampleR2.fastq.gz")
+        validator2._detect_illumina_pattern("sampleR2.fastq.gz")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 2
+
+    # ==================== Compression Format Independence ====================
+
+    def test_compression_independence(self):
+        """Test that pattern detection works regardless of compression format."""
+        # Test with .gz compression
+        validator1 = self._create_validator_with_basename("sample_R1.fastq.gz")
+        validator1._detect_illumina_pattern("sample_R1.fastq.gz")
+        assert validator1.output_metadata.base_name == "sample"
+        assert validator1.output_metadata.read_number == 1
+
+        # Test with .bz2 compression
+        validator2 = self._create_validator_with_basename("sample_R2.fastq.bz2")
+        validator2._detect_illumina_pattern("sample_R2.fastq.bz2")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 2
+
+        # Test with no compression
+        validator3 = self._create_validator_with_basename("sample_1.fastq")
+        validator3._detect_illumina_pattern("sample_1.fastq")
+        assert validator3.output_metadata.base_name == "sample"
+        assert validator3.output_metadata.read_number == 1
+
+        # Test with .fq extension (alternate FASTQ)
+        validator4 = self._create_validator_with_basename("sample_2.fq")
+        validator4._detect_illumina_pattern("sample_2.fq")
+        assert validator4.output_metadata.base_name == "sample"
+        assert validator4.output_metadata.read_number == 2
+
+    # ==================== Pattern Priority Order ====================
+
+    def test_pattern_priority_order(self):
+        """Test that patterns are matched in correct priority order (most specific first)."""
+        # _R1_001 should match lane number pattern (higher priority)
+        validator1 = self._create_validator_with_basename("sample_R1_001.fastq.gz")
+        validator1._detect_illumina_pattern("sample_R1_001.fastq.gz")
+        assert validator1.output_metadata.base_name == "sample"
+        assert validator1.output_metadata.read_number == 1
+
+        # _R1_combined should match arbitrary suffix pattern
+        validator2 = self._create_validator_with_basename("sample_R1_combined.fastq.gz")
+        validator2._detect_illumina_pattern("sample_R1_combined.fastq.gz")
+        assert validator2.output_metadata.base_name == "sample"
+        assert validator2.output_metadata.read_number == 1
+
+        # _1_001 should match lane number pattern without R prefix
+        validator3 = self._create_validator_with_basename("sample_1_001.fastq.gz")
+        validator3._detect_illumina_pattern("sample_1_001.fastq.gz")
+        assert validator3.output_metadata.base_name == "sample"
+        assert validator3.output_metadata.read_number == 1
+
+        # Plain _R1 should match standard pattern
+        validator4 = self._create_validator_with_basename("sample_R1.fastq.gz")
+        validator4._detect_illumina_pattern("sample_R1.fastq.gz")
+        assert validator4.output_metadata.base_name == "sample"
+        assert validator4.output_metadata.read_number == 1
+
+    # ==================== Edge Cases ====================
+
+    def test_edge_case_short_filenames(self):
+        """Test very short filenames."""
+        # Single character base name
+        validator = self._create_validator_with_basename("a_R1.fastq")
+        validator._detect_illumina_pattern("a_R1.fastq")
+        assert validator.output_metadata.base_name == "a"
+        assert validator.output_metadata.read_number == 1
+
+        # Two character base name
+        validator2 = self._create_validator_with_basename("ab_R2.fastq")
+        validator2._detect_illumina_pattern("ab_R2.fastq")
+        assert validator2.output_metadata.base_name == "ab"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_edge_case_long_filenames(self):
+        """Test filenames with many underscores and parts."""
+        validator = self._create_validator_with_basename(
+            "my_very_long_sample_name_with_many_parts_R2.fastq.gz"
+        )
+        validator._detect_illumina_pattern(
+            "my_very_long_sample_name_with_many_parts_R2.fastq.gz"
+        )
+        assert validator.output_metadata.base_name == "my_very_long_sample_name_with_many_parts"
+        assert validator.output_metadata.read_number == 2
+
+    def test_edge_case_numbers_in_basename(self):
+        """Test filenames with numbers in the base name."""
+        # Numbers in middle
+        validator = self._create_validator_with_basename("sample123_R1.fastq")
+        validator._detect_illumina_pattern("sample123_R1.fastq")
+        assert validator.output_metadata.base_name == "sample123"
+        assert validator.output_metadata.read_number == 1
+
+        # Numbers at start
+        validator2 = self._create_validator_with_basename("123sample_R2.fastq")
+        validator2._detect_illumina_pattern("123sample_R2.fastq")
+        assert validator2.output_metadata.base_name == "123sample"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_edge_case_mixed_separators(self):
+        """Test filenames with both hyphens and underscores."""
+        validator = self._create_validator_with_basename("sample-name_123_R1.fastq")
+        validator._detect_illumina_pattern("sample-name_123_R1.fastq")
+        assert validator.output_metadata.base_name == "sample-name_123"
+        assert validator.output_metadata.read_number == 1
+
+    def test_edge_case_uppercase_extensions(self):
+        """Test that pattern detection works with uppercase extensions."""
+        # Uppercase .FASTQ.GZ
+        validator = self._create_validator_with_basename("sample_R1.FASTQ.GZ")
+        validator._detect_illumina_pattern("sample_R1.FASTQ.GZ")
+        assert validator.output_metadata.base_name == "sample"
+        assert validator.output_metadata.read_number == 1
+
+    # ==================== Invalid Patterns ====================
+
+    def test_invalid_read_numbers(self):
+        """Test that invalid read numbers (not 1 or 2) are not matched."""
+        # R3 is not valid (only R1 and R2 are valid)
+        validator1 = self._create_validator_with_basename("sample_R3.fastq")
+        validator1._detect_illumina_pattern("sample_R3.fastq")
+        assert validator1.output_metadata.base_name is None
+        assert validator1.output_metadata.read_number is None
+        assert validator1.output_metadata.ngs_type_detected is None
+
+        # _3 is not valid
+        validator2 = self._create_validator_with_basename("sample_3.fastq")
+        validator2._detect_illumina_pattern("sample_3.fastq")
+        assert validator2.output_metadata.base_name is None
+        assert validator2.output_metadata.read_number is None
+
+        # R0 is not valid
+        validator3 = self._create_validator_with_basename("sample_R0.fastq")
+        validator3._detect_illumina_pattern("sample_R0.fastq")
+        assert validator3.output_metadata.base_name is None
+
+    def test_invalid_ambiguous_patterns(self):
+        """Test that ambiguous or malformed patterns are not matched."""
+        # Just R1 without base name (edge case - might match with empty base_name)
+        validator1 = self._create_validator_with_basename("R1.fastq")
+        validator1._detect_illumina_pattern("R1.fastq")
+        # This should either not match OR match with empty base_name
+        if validator1.output_metadata.read_number is not None:
+            assert validator1.output_metadata.base_name == ""
+
+        # R1 in middle of filename (not at end)
+        validator2 = self._create_validator_with_basename("R1_sample.fastq")
+        validator2._detect_illumina_pattern("R1_sample.fastq")
+        # Should not match standard patterns since R1 is not at end
+        assert validator2.output_metadata.read_number is None
+
+    def test_invalid_lowercase_r_prefix(self):
+        """Test that lowercase 'r' prefix is not matched (Illumina uses uppercase R)."""
+        validator = self._create_validator_with_basename("sample_r1.fastq")
+        validator._detect_illumina_pattern("sample_r1.fastq")
+        # Should not match - Illumina uses uppercase R1/R2
+        assert validator.output_metadata.base_name is None
+        assert validator.output_metadata.read_number is None
+
+    # ==================== Metadata Isolation Tests ====================
+
+    def test_metadata_isolation_between_calls(self):
+        """Test that each call properly updates metadata independently."""
+        validator = self._create_validator_with_basename("sample1_R1.fastq.gz")
+
+        # First detection
+        validator._detect_illumina_pattern("sample1_R1.fastq.gz")
+        assert validator.output_metadata.base_name == "sample1"
+        assert validator.output_metadata.read_number == 1
+
+        # Create new validator for second file
+        validator2 = self._create_validator_with_basename("sample2_R2.fastq.gz")
+        validator2._detect_illumina_pattern("sample2_R2.fastq.gz")
+
+        # Verify second detection didn't affect first
+        assert validator.output_metadata.base_name == "sample1"
+        assert validator.output_metadata.read_number == 1
+
+        # Verify second detection correct
+        assert validator2.output_metadata.base_name == "sample2"
+        assert validator2.output_metadata.read_number == 2
+
+    def test_metadata_cleared_when_no_pattern(self):
+        """Test that metadata remains None when no pattern is detected."""
+        validator = self._create_validator_with_basename("single_end_sample.fastq.gz")
+
+        # Should remain None after detection (no pattern)
+        validator._detect_illumina_pattern("single_end_sample.fastq.gz")
+        assert validator.output_metadata.base_name is None
+        assert validator.output_metadata.read_number is None
+        assert validator.output_metadata.ngs_type_detected is None
 
 
 if __name__ == "__main__":

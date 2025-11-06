@@ -11,6 +11,7 @@ Provides unified utilities for:
 
 import gzip
 import bz2
+import re
 from pathlib import Path
 from typing import Union, TextIO, Type, Tuple, Any, Dict
 
@@ -273,40 +274,65 @@ def detect_compression_type(filepath: Path) -> CodingType:
 
 def detect_file_format(filepath: Path, format_enum: Type[Union[GenomeFormat, ReadFormat, FeatureFormat]]) -> Union[GenomeFormat, ReadFormat, FeatureFormat]:
     """
-    Detect file format from file path and return appropriate enum.
+    Detect file format from extension.
 
-    Checks the first extension (before compression) to determine format.
+    Only examines the last 2 extensions:
+    - Last extension: Compression (.gz, .bz2, or none)
+    - Second-to-last extension: Format (.fastq, .fq, .bam, etc.)
+
+    This approach ignores any prefix extensions like .R1, .R2, .1, .2, etc.
+
+    Examples:
+        sample.fastq.gz       → format: .fastq
+        sample.R1.fastq.gz    → format: .fastq
+        sample.1.fq.bz2       → format: .fq
+        sample.bam            → format: .bam
+        sample.R1.fastq       → format: .fastq (no compression)
 
     Args:
         filepath: Path to file
-        format_enum: Format enum class (GenomeFormat, ReadFormat, or FeatureFormat)
+        format_enum: Format enum class (ReadFormat, GenomeFormat, FeatureFormat)
 
     Returns:
-        Format enum member
+        Format enum value
 
     Raises:
         ValueError: If format cannot be determined
-
-    Examples:
-        >>> detect_file_format(Path('genome.fasta'), GenomeFormat)
-        GenomeFormat.FASTA
-        >>> detect_file_format(Path('genome.fasta.gz'), GenomeFormat)
-        GenomeFormat.FASTA
-        >>> detect_file_format(Path('reads.fastq.bz2'), ReadFormat)
-        ReadFormat.FASTQ
-        >>> detect_file_format(Path('features.gff'), FeatureFormat)
-        FeatureFormat.GFF
     """
     suffixes = Path(filepath).suffixes
 
     if not suffixes:
         raise ValueError(f"Cannot determine format: no extension found in {filepath.name}")
 
-    # Get first extension (the format, before compression)
-    format_ext = suffixes[0]
+    # Check if last extension is a known compression type
+    compression_extensions = {'.gz', '.gzip', '.bz2', '.bzip2'}
+    last_ext_lower = suffixes[-1].lower()
+    has_compression = last_ext_lower in compression_extensions
+
+    # Determine format extension based on compression status
+    if len(suffixes) == 1:
+        # Only one extension: must be the format (no compression)
+        # Example: sample.fastq
+        format_ext = suffixes[0]
+    elif has_compression:
+        # Last extension is compression: format is second-to-last
+        # Example: sample.fastq.gz → suffixes[-2] = .fastq
+        # Example: sample.R1.fastq.gz → suffixes[-2] = .fastq (3+ extensions)
+        format_ext = suffixes[-2]
+    else:
+        # Multiple extensions but last is NOT compression: format is last
+        # Example: sample.R1.fastq → suffixes[-1] = .fastq
+        # Example: sample.processed.fasta → suffixes[-1] = .fasta
+        format_ext = suffixes[-1]
 
     # Let the format enum's _missing_ method handle the conversion
-    return format_enum(format_ext)
+    try:
+        return format_enum(format_ext)
+    except ValueError as e:
+        raise ValueError(
+            f"Cannot determine format for {filepath.name}: {e}\n"
+            f"Supported formats: {', '.join([fmt.name for fmt in format_enum])}"
+        )
 
 
 def parse_config_file_value(
@@ -720,3 +746,69 @@ def open_compressed_writer(filepath: Union[str, Path], coding_type: CodingType, 
     else:
         # No compression
         return open(filepath, 'w')
+
+
+def get_incremented_path(path: Path, separator: str = "_") -> Path:
+    """
+    Get next available filename by auto-incrementing if file exists.
+
+    Prevents overwriting existing files by adding an incremented number suffix.
+    If the file doesn't exist, returns the original path.
+    If it exists, adds _001, _002, etc. before the extension.
+
+    Args:
+        path: Original file path (can be Path object or string)
+        separator: Separator before number (default: "_")
+
+    Returns:
+        Path: Next available path (original if doesn't exist, incremented if exists)
+
+    Examples:
+        >>> # If report.txt doesn't exist:
+        >>> get_incremented_path(Path("report.txt"))
+        Path("report.txt")
+
+        >>> # If report.txt exists:
+        >>> get_incremented_path(Path("report.txt"))
+        Path("report_001.txt")
+
+        >>> # If report_001.txt also exists:
+        >>> get_incremented_path(Path("report.txt"))
+        Path("report_002.txt")
+
+        >>> # If given report_001.txt and it exists:
+        >>> get_incremented_path(Path("report_001.txt"))
+        Path("report_002.txt")
+    """
+    # Ensure path is a Path object
+    path = Path(path)
+
+    # If file doesn't exist, return original path
+    if not path.exists():
+        return path
+
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+
+    # Check if stem already has increment pattern (e.g., report_001)
+    match = re.match(r'^(.+)_(\d+)$', stem)
+    if match:
+        base_stem = match.group(1)
+        start_counter = int(match.group(2)) + 1
+    else:
+        base_stem = stem
+        start_counter = 1
+
+    # Find next available number
+    counter = start_counter
+    while True:
+        new_name = f"{base_stem}{separator}{counter:03d}{suffix}"
+        new_path = parent / new_name
+        if not new_path.exists():
+            return new_path
+        counter += 1
+
+        # Safety check to avoid infinite loop
+        if counter > 9999:
+            raise RuntimeError(f"Too many incremented files for {path}. Maximum is 9999.")
