@@ -995,15 +995,11 @@ class ReadValidator:
             # This ensures all Illumina reads have consistent _R1 or _R2 naming
             base_name = f"{self.read_config.basename}_R1"
 
-        # Remove all suffixes (.fastq.gz -> remove .gz then .fastq)
-        for suffix in self.input_path.suffixes:
-            base_name = base_name.replace(suffix, '')
         # Add suffix if specified
         if self.settings.output_filename_suffix:
             output_filename = f"{base_name}_{self.settings.output_filename_suffix}.fastq"
         else:
             output_filename = f"{base_name}.fastq"
-
 
         # Add compression extension if requested (from settings)
         # Normalize settings.coding_type to CodingType enum
