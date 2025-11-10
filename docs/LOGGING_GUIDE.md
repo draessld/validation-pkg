@@ -275,6 +275,17 @@ logging_level = config.get_logging_level()  # Returns "DEBUG"
 
 The logging level is applied automatically when you load the config.
 
+**How it works:**
+1. Logger is initialized with default level (INFO) when validation_pkg is imported
+2. ConfigManager loads and parses config.json
+3. After parsing `options.logging_level`, ConfigManager calls `logger.reconfigure_level()`
+4. Logger updates console handler to use the new level
+5. All subsequent logging uses the user-specified level
+
+This two-phase initialization ensures:
+- Config loading messages are captured (at INFO level)
+- User's preferred level is applied for all validation operations
+
 ## Implementation Details
 
 ### Logger Architecture
