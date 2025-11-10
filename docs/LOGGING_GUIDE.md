@@ -240,6 +240,41 @@ logger = setup_logging(
 logger = setup_logging(console_level="INFO")
 ```
 
+### Logging Level in Config File ⭐ **NEW**
+
+You can now specify the logging level globally in `config.json`:
+
+```json
+{
+  "ref_genome_filename": {"filename": "genome.fasta"},
+  "reads": [
+    {"filename": "reads.fastq", "ngs_type": "illumina"}
+  ],
+  "options": {
+    "threads": 8,
+    "validation_level": "trust",
+    "logging_level": "DEBUG"
+  }
+}
+```
+
+**Supported levels:**
+- `"DEBUG"`: Most verbose (all messages including debug info)
+- `"INFO"`: Standard output (validation progress, file operations)
+- `"WARNING"`: Warnings and errors only
+- `"ERROR"`: Errors only
+- `"CRITICAL"`: Critical errors only
+
+**Usage:**
+```python
+from validation_pkg import ConfigManager
+
+config = ConfigManager.load("config.json")
+logging_level = config.get_logging_level()  # Returns "DEBUG"
+```
+
+The logging level is applied automatically when you load the config.
+
 ## Implementation Details
 
 ### Logger Architecture

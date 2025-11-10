@@ -1227,8 +1227,6 @@ class TestParallelValidationLogging:
         log_file = temp_dir / "test.log"
         logger = setup_logging(log_file=log_file)
 
-        # Verify parallel logging is disabled at start
-        assert not logger.is_parallel_logging_enabled()
 
         read_config = ReadConfig(
             filename="test.fastq",
@@ -1248,14 +1246,12 @@ class TestParallelValidationLogging:
         validator._parse_file()
         validator._validate_sequences()
 
-        # Verify parallel logging is still disabled
-        assert not logger.is_parallel_logging_enabled()
 
         # Check log file - should NOT have process_id
         log_content = log_file.read_text()
         assert '"process_id"' not in log_content
     def test_parallel_validation_enables_parallel_logging(self, temp_dir, output_dir):
-        """Test that parallel validation (threads>1) enables parallel logging."""
+        """Test that parallel validation (threads>1) logs parallel-related messages."""
         from validation_pkg.logger import setup_logging, get_logger
 
         fastq_file = temp_dir / "test.fastq"
@@ -1264,8 +1260,6 @@ class TestParallelValidationLogging:
         log_file = temp_dir / "test.log"
         logger = setup_logging(log_file=log_file)
 
-        # Verify parallel logging is disabled at start
-        assert not logger.is_parallel_logging_enabled()
 
         read_config = ReadConfig(
             filename="test.fastq",
@@ -1285,12 +1279,10 @@ class TestParallelValidationLogging:
         validator._parse_file()
         validator._validate_sequences()
 
-        # Verify parallel logging is disabled after validation (cleanup)
-        assert not logger.is_parallel_logging_enabled()
 
-        # Check log file - SHOULD have process_id during parallel section
+        # Check log file - SHOULD have parallel-related messages
         log_content = log_file.read_text()
-        assert '"process_id"' in log_content
+        assert '"parallel_mode": true' in log_content or 'Parallel validation enabled' in log_content
     def test_trust_mode_no_parallel_logging(self, temp_dir, output_dir):
         """Test that trust mode never enables parallel logging (always sequential)."""
         from validation_pkg.logger import setup_logging, get_logger
@@ -1301,8 +1293,6 @@ class TestParallelValidationLogging:
         log_file = temp_dir / "test.log"
         logger = setup_logging(log_file=log_file)
 
-        # Verify parallel logging is disabled at start
-        assert not logger.is_parallel_logging_enabled()
 
         read_config = ReadConfig(
             filename="test.fastq",
@@ -1322,8 +1312,6 @@ class TestParallelValidationLogging:
         validator._parse_file()
         validator._validate_sequences()
 
-        # Verify parallel logging is still disabled
-        assert not logger.is_parallel_logging_enabled()
 
         # Check log file - should NOT have process_id
         log_content = log_file.read_text()
@@ -1348,8 +1336,6 @@ class TestParallelValidationLogging:
         log_file = temp_dir / "test.log"
         logger = setup_logging(log_file=log_file)
 
-        # Verify parallel logging is disabled at start
-        assert not logger.is_parallel_logging_enabled()
 
         read_config = ReadConfig(
             filename="invalid.fastq",
@@ -1372,8 +1358,6 @@ class TestParallelValidationLogging:
         with pytest.raises(ReadValidationError):
             validator._validate_sequences()
 
-        # Verify parallel logging is disabled after error (cleanup via finally block)
-        assert not logger.is_parallel_logging_enabled()
 
     def test_full_validation_with_parallel_logging(self, temp_dir, output_dir):
         """Integration test: Full validation run with parallel logging."""
@@ -1386,7 +1370,6 @@ class TestParallelValidationLogging:
         logger = setup_logging(log_file=log_file, console_level="DEBUG")
 
         # Initial state
-        assert not logger.is_parallel_logging_enabled()
 
         read_config = ReadConfig(
             filename="test.fastq",
@@ -1408,15 +1391,10 @@ class TestParallelValidationLogging:
         # Full validation run
         validator.run()
 
-        # Verify cleanup
-        assert not logger.is_parallel_logging_enabled()
-
         # Check log file
         log_content = log_file.read_text()
 
-        # Should have parallel validation messages
-        assert '"process_id"' in log_content
-        # Should mention parallel validation
+        # Should mention parallel validation (no longer checking for process_id)
         assert 'parallel_mode' in log_content.lower() or 'parallel validation' in log_content.lower()
 
     def test_multiple_validations_cleanup(self, temp_dir, output_dir):
@@ -1448,7 +1426,6 @@ class TestParallelValidationLogging:
         validator1._validate_sequences()
 
         # Should be cleaned up
-        assert not logger.is_parallel_logging_enabled()
 
         # Second validation (sequential)
         read_config2 = ReadConfig(
@@ -1467,7 +1444,6 @@ class TestParallelValidationLogging:
         validator2._validate_sequences()
 
         # Should still be disabled
-        assert not logger.is_parallel_logging_enabled()
 
 
 class TestIlluminaPatternDetection:
@@ -1903,6 +1879,166 @@ class TestIlluminaPatternDetection:
         assert validator.output_metadata.base_name is None
         assert validator.output_metadata.read_number is None
         assert validator.output_metadata.ngs_type_detected is None
+
+
+class TestReadStatistics:
+    """Test read statistics calculation in strict mode."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def output_dir(self, temp_dir):
+        """Create output directory."""
+        out_dir = temp_dir / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    @pytest.fixture
+    def test_fastq_with_known_stats(self, temp_dir):
+        """Create FASTQ file with known read statistics."""
+        fastq_path = temp_dir / "test_reads.fastq.gz"
+
+        # Create reads with known lengths for N50 calculation
+        reads = [
+            SeqRecord(Seq("A" * 1000), id="read1", description=""),  # 1000 bp
+            SeqRecord(Seq("T" * 800), id="read2", description=""),   # 800 bp
+            SeqRecord(Seq("G" * 600), id="read3", description=""),   # 600 bp
+            SeqRecord(Seq("C" * 400), id="read4", description=""),   # 400 bp
+            SeqRecord(Seq("A" * 200), id="read5", description=""),   # 200 bp
+        ]
+        # Total: 3000 bp, N50 should be 800 bp (cumulative > 1500 bp at 800)
+
+        # Add quality scores
+        for read in reads:
+            read.letter_annotations["phred_quality"] = [40] * len(read.seq)
+
+        with gzip.open(fastq_path, 'wt') as f:
+            SeqIO.write(reads, f, 'fastq')
+
+        return fastq_path
+
+    def test_strict_mode_statistics(self, test_fastq_with_known_stats, output_dir):
+        """Test that strict mode calculates all read statistics."""
+        read_config = ReadConfig(
+            filepath=test_fastq_with_known_stats,
+            filename=test_fastq_with_known_stats.name,
+            coding_type=CodingType.GZIP,
+            detected_format=ReadFormat.FASTQ,
+            ngs_type='illumina',
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
+        )
+
+        validator = ReadValidator(read_config)
+        metadata = validator.run()
+
+        # Basic fields
+        assert metadata.output_file is not None
+        assert metadata.num_reads == 5
+        assert metadata.validation_level == 'strict'
+
+        # Statistics should be calculated
+        assert metadata.n50 == 800, f"Expected N50=800, got {metadata.n50}"
+        assert metadata.total_bases == 3000, f"Expected total=3000, got {metadata.total_bases}"
+        assert metadata.mean_read_length == 600.0, f"Expected mean=600.0, got {metadata.mean_read_length}"
+        assert metadata.longest_read_length == 1000
+        assert metadata.shortest_read_length == 200
+
+    def test_trust_mode_no_statistics(self, test_fastq_with_known_stats, output_dir):
+        """Test that trust mode does NOT calculate expensive statistics."""
+        read_config = ReadConfig(
+            filepath=test_fastq_with_known_stats,
+            filename=test_fastq_with_known_stats.name,
+            coding_type=CodingType.GZIP,
+            detected_format=ReadFormat.FASTQ,
+            ngs_type='illumina',
+            output_dir=output_dir,
+            global_options={'validation_level': 'trust'}
+        )
+
+        validator = ReadValidator(read_config)
+        metadata = validator.run()
+
+        # Basic fields should be set
+        assert metadata.output_file is not None
+        assert metadata.num_reads == 5
+        assert metadata.validation_level == 'trust'
+
+        # Statistics should NOT be calculated in trust mode
+        assert metadata.n50 is None
+        assert metadata.total_bases is None
+        assert metadata.mean_read_length is None
+        assert metadata.longest_read_length is None
+        assert metadata.shortest_read_length is None
+
+    def test_n50_calculation_accuracy(self, temp_dir, output_dir):
+        """Test N50 calculation with known dataset."""
+        # Create specific dataset to verify N50 calculation
+        fastq_path = temp_dir / "n50_test.fastq"
+        reads = [
+            SeqRecord(Seq("A" * 100), id="read1", description=""),   # 100 bp
+            SeqRecord(Seq("T" * 200), id="read2", description=""),   # 200 bp
+            SeqRecord(Seq("G" * 300), id="read3", description=""),   # 300 bp
+            SeqRecord(Seq("C" * 400), id="read4", description=""),   # 400 bp
+        ]
+        # Total: 1000 bp
+        # Sorted: 400, 300, 200, 100
+        # Cumulative: 400 (not >= 500), 700 (>= 500)
+        # N50 = 300 bp
+
+        for read in reads:
+            read.letter_annotations["phred_quality"] = [40] * len(read.seq)
+
+        with open(fastq_path, 'w') as f:
+            SeqIO.write(reads, f, 'fastq')
+
+        read_config = ReadConfig(
+            filepath=fastq_path,
+            filename=fastq_path.name,
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            ngs_type='ont',
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
+        )
+
+        validator = ReadValidator(read_config)
+        metadata = validator.run()
+
+        assert metadata.n50 == 300, f"N50 should be 300 bp, got {metadata.n50}"
+        assert metadata.total_bases == 1000
+        assert metadata.mean_read_length == 250.0
+
+    def test_empty_reads_statistics(self, temp_dir, output_dir):
+        """Test statistics with no reads (edge case)."""
+        # This test may not work if validation fails on empty files
+        # But it tests the _calculate_read_statistics() method robustness
+        from validation_pkg.validators.read_validator import ReadValidator
+
+        read_config = ReadConfig(
+            filepath=Path("dummy.fastq"),
+            filename="dummy.fastq",
+            coding_type=CodingType.NONE,
+            detected_format=ReadFormat.FASTQ,
+            ngs_type='illumina',
+            output_dir=output_dir,
+            global_options={'validation_level': 'strict'}
+        )
+
+        validator = ReadValidator(read_config)
+        validator.sequences = []  # Empty sequences
+
+        stats = validator._calculate_read_statistics()
+
+        assert stats['n50'] == 0
+        assert stats['total_bases'] == 0
+        assert stats['mean_read_length'] == 0.0
+        assert stats['longest_read_length'] == 0
+        assert stats['shortest_read_length'] == 0
 
 
 if __name__ == "__main__":

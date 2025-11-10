@@ -270,16 +270,22 @@ All files in `reads_dir/` will be loaded and assigned `ngs_type: "ont"`.
   },
   "options": {
     "threads": 8,
-    "validation_level": "trust"
+    "validation_level": "trust",
+    "logging_level": "INFO"
   }
 }
 ```
+
+**Global Options:**
+- `threads`: Number of parallel threads (default: 8, warns if > CPU cores)
+- `validation_level`: `"strict"`, `"trust"`, or `"minimal"` (default: `"strict"`)
+- `logging_level`: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"` (default: `"INFO"`)
 
 **How the 4-layer settings system works:**
 
 1. **Layer 1 (Defaults):** Built-in defaults from Settings dataclass
 2. **Layer 2 (Global options):** `options` field applies to ALL files
-   - Only `threads` and `validation_level` allowed
+   - Only `threads`, `validation_level`, and `logging_level` allowed
    - Prevents mistakes (e.g., can't set `plasmid_split` globally)
 3. **Layer 3 (File-level):** Per-file settings override global
    - Any Settings field can be specified
@@ -586,6 +592,35 @@ For a genome file with 3 sequences (1 chromosome + 2 plasmids):
 | Strict | ~1 sec | ~50MB | All sequences validated |
 | Trust | ~0.5 sec | ~50MB | First sequence validated |
 | Minimal | ~0.1 sec | ~5MB | File copy only |
+
+### Thread Optimization ⭐ NEW
+
+The package automatically detects CPU cores and warns if you specify too many threads:
+
+```json
+{
+  "options": {
+    "threads": 16
+  }
+}
+```
+
+If your system has only 4 cores, you'll see:
+```
+WARNING: Requested 16 threads but system only has 4 CPU cores.
+         Performance may degrade due to context switching overhead.
+         Consider using threads ≤ 4 for optimal performance.
+```
+
+**Best practices:**
+- Default threads: 8 (good for most systems)
+- Set `threads ≤ CPU cores` for best performance
+- Use `threads=1` for single-file processing on low-end systems
+- Use `threads > 1` only for multi-file batches or large FASTQ files in strict mode
+
+**Compression tool selection:**
+- `threads=1`: Uses gzip/bzip2 (better performance than pigz/pbzip2 with 1 thread)
+- `threads > 1`: Uses pigz/pbzip2 if available (3-4x faster)
 
 ### Memory-Efficient Processing
 

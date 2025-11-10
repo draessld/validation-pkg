@@ -369,9 +369,24 @@ You can specify threads in `config.json`:
 
 ### Best Practices
 
+**Default Threads:** ⭐ **NEW**
+- Default: 8 threads (configurable via `DEFAULT_THREADS` in config_manager.py)
+- Good balance for most systems (can process 8 files in parallel or 1 large file with 8 workers)
+
+**CPU Core Detection:** ⭐ **NEW**
+- System automatically detects available CPU cores using `os.cpu_count()`
+- **Warns if threads > CPU cores** to prevent performance degradation
+- Example on 4-core system:
+  ```
+  WARNING: Requested 16 threads but system only has 4 CPU cores.
+           Performance may degrade due to context switching overhead.
+           Consider using threads ≤ 4 for optimal performance.
+  ```
+
 **For CPU cores:**
-- Set `threads` to number of physical CPU cores (typically 4-8)
-- Don't exceed total CPU cores (check with `nproc` or `sysctl -n hw.ncpu`)
+- **Best practice**: Set `threads ≤ CPU cores` for optimal performance
+- System auto-detects and warns, but doesn't prevent (you may want threads > cores for I/O-bound tasks)
+- Check your system: `nproc` (Linux) or `sysctl -n hw.ncpu` (macOS)
 
 **For memory constraints:**
 - Each parallel file loads into memory
@@ -382,6 +397,11 @@ You can specify threads in `config.json`:
 - Compression is CPU-bound, decompression is I/O-bound
 - SSDs benefit from higher thread counts
 - HDDs may bottleneck with too many workers
+
+**Compression Tool Selection:** ⭐ **NEW**
+- `threads=1`: Uses standard gzip/bzip2 (better performance than pigz/pbzip2 with single thread)
+- `threads > 1`: Uses parallel pigz/pbzip2 if available (3-4x faster)
+- Reason: pigz/pbzip2 have overhead that makes them slower with only 1 thread
 
 ---
 

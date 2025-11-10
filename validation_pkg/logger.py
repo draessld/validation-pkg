@@ -15,12 +15,8 @@ from typing import Optional, Dict, List
 from threading import Lock
 from dataclasses import dataclass
 import structlog
-from contextvars import ContextVar
 import logging
 import time
-
-# Context variable to track when parallel validation is active
-_parallel_validation_active: ContextVar[bool] = ContextVar('parallel_validation_active', default=False)
 
 
 @dataclass
@@ -65,31 +61,12 @@ def add_log_level_colors(_, level: str, event_dict: dict) -> dict:
     return event_dict
 
 
-def add_process_info(logger, method_name, event_dict: dict) -> dict:
-    """
-    Add process ID to log entries (only when parallel validation is active).
-
-    This processor conditionally adds:
-    - process_id: The OS process ID (PID) of the coordinating process
-
-    This field only appears during parallel validation to identify the main
-    coordinating process. Worker processes don't log directly - they return
-    results to the main process.
-    """
-    # Only add process info during parallel validation
-    if _parallel_validation_active.get(False):
-        event_dict["process_id"] = os.getpid()
-
-    return event_dict
-
-
 def format_process_info(logger, method_name, event_dict: dict) -> dict:
     """
     Format process/worker information for display in console logs.
 
-    Creates a formatted prefix like: [Worker-1 PID:12345]
+    Creates a formatted prefix like: [Worker-1] or [file.fastq]
     This appears before the log message for easy identification.
-    Only shows PID during parallel validation to keep sequential logs clean.
     """
     worker_id = event_dict.get("worker_id")
     file_context = event_dict.get("file_context")
@@ -99,11 +76,6 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
 
     if worker_id:
         context_parts.append(f"{Colors.CYAN}Worker-{worker_id}{Colors.RESET}")
-
-    # Only show PID during parallel validation
-    if _parallel_validation_active.get(False):
-        pid = event_dict.get("process_id", os.getpid())
-        context_parts.append(f"{Colors.GRAY}PID:{pid}{Colors.RESET}")
 
     if file_context:
         # Shorten long file paths
@@ -116,6 +88,20 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
 
     return event_dict
 
+class ValidationReport:
+    """
+    TODO
+    """
+    def __init__(self,output_path):
+        self.output_path = output_path
+        self.handle = open(output_path)
+
+    def write(self):
+        pass
+
+    def flush(self):
+        self.handle.flush()
+        self.handle.close()
 
 class ValidationLogger:
     """
@@ -207,7 +193,6 @@ class ValidationLogger:
             # Use stdlib logging with structlog
             processors = [
                 structlog.contextvars.merge_contextvars,
-                add_process_info,  # Add PID and thread ID
                 structlog.stdlib.add_log_level,
                 structlog.stdlib.add_logger_name,
                 structlog.processors.TimeStamper(fmt="iso"),
@@ -257,16 +242,15 @@ class ValidationLogger:
             # No file logging - use PrintLogger for simplicity
             processors = [
                 structlog.contextvars.merge_contextvars,
-                add_process_info,  # Add PID and thread ID
                 structlog.processors.add_log_level,
                 structlog.processors.TimeStamper(fmt="iso"),
                 structlog.processors.StackInfoRenderer(),
                 structlog.processors.format_exc_info,
             ]
 
-            # Console renderer with colors and process info
+            # Console renderer with colors and context info
             console_processors = processors + [
-                format_process_info,  # Format worker/PID/file context
+                format_process_info,  # Format worker/file context
                 add_log_level_colors,
                 structlog.dev.ConsoleRenderer(colors=True)
             ]
@@ -576,46 +560,6 @@ class ValidationLogger:
         with self._issues_lock:
             self.validation_issues.clear()
 
-    def enable_parallel_logging(self):
-        """
-        Enable parallel validation logging mode.
-
-        When enabled, process_id will be added to all log entries from the
-        coordinating process. This helps identify which process is managing
-        the parallel validation work.
-
-        Example:
-            >>> logger = get_logger()
-            >>> logger.enable_parallel_logging()
-            >>> # Now process_id appears in logs
-            >>> logger.info("Starting parallel validation")
-        """
-        _parallel_validation_active.set(True)
-
-    def disable_parallel_logging(self):
-        """
-        Disable parallel validation logging mode.
-
-        When disabled, process_id will NOT be added to log entries.
-        This should be called after parallel validation completes.
-
-        Example:
-            >>> logger = get_logger()
-            >>> logger.disable_parallel_logging()
-            >>> # Now process_id is hidden from logs
-            >>> logger.info("Parallel validation complete")
-        """
-        _parallel_validation_active.set(False)
-
-    def is_parallel_logging_enabled(self) -> bool:
-        """
-        Check if parallel validation logging mode is currently enabled.
-
-        Returns:
-            bool: True if parallel logging is enabled, False otherwise
-        """
-        return _parallel_validation_active.get(False)
-
     def __enter__(self):
         """
         Context manager entry - clear issues at start.
@@ -670,3 +614,13 @@ def setup_logging(
     logger = get_logger()
     logger.setup(console_level, log_file, report_file)
     return logger
+
+
+# ============================================================================
+# ValidationReport - Import from separate module
+# ============================================================================
+
+from validation_pkg.report import ValidationReport
+
+# Export for backwards compatibility
+__all__ = ['ValidationLogger', 'get_logger', 'setup_logging', 'ValidationReport']

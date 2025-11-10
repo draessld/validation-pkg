@@ -113,7 +113,10 @@ from validation_pkg.config_manager import ConfigManager, Config
 from validation_pkg.validators.genome_validator import GenomeValidator
 from validation_pkg.validators.read_validator import ReadValidator
 from validation_pkg.validators.feature_validator import FeatureValidator
+from validation_pkg.validators.interfile_read import ReadXReadSettings, readxread_validation
+from validation_pkg.validators.interfile_genome import GenomeXGenomeSettings, genomexgenome_validation
 from validation_pkg.logger import setup_logging, get_logger
+from validation_pkg.report import ValidationReport
 
 # Functional API imports
 from typing import Optional, List
@@ -176,24 +179,25 @@ def validate_reads(
         settings: Optional ReadValidator.Settings object (uses defaults if None)
 
     Returns:
-        List of validation results (dicts with 'success', 'filename', 'error' keys)
+        List of result dicts with output file path and metadata:
+        [
+            {
+                'output_file': str,
+                'output_metadata': {
+                    'base_name': str,
+                    'read_number': int,
+                    'ngs_type_detected': str,
+                    'num_reads': int
+                }
+            },
+            ...
+        ]
     """
     results = []
     for read_config in read_configs:
-        try:
-            validator = ReadValidator(read_config, settings)
-            validator.run()
-            results.append({
-                'success': True,
-                'filename': read_config.filename,
-                'error': None
-            })
-        except Exception as e:
-            results.append({
-                'success': False,
-                'filename': read_config.filename,
-                'error': str(e)
-            })
+        validator = ReadValidator(read_config, settings)
+        result = validator.run()
+        results.append(result)
     return results
 
 def validate_genomes(
@@ -277,7 +281,7 @@ def validate_features(
     results = []
     for feature_config in feature_configs:
         try:
-            validator = GenomeValidator(feature_config, settings)
+            validator = FeatureValidator(feature_config, settings)
             validator.run()
             results.append({
                 'success': True,
@@ -310,9 +314,16 @@ __all__ = [
     'validate_feature',
     'validate_features',
 
+    # Inter-file Validation
+    'ReadXReadSettings',
+    'readxread_validation',
+    'GenomeXGenomeSettings',
+    'genomexgenome_validation',
+
     # Logging
     'setup_logging',
     'get_logger',
+    'ValidationReport'
 
     # Version info
     '__version__',

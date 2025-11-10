@@ -23,6 +23,7 @@ from typing import Optional, List, IO, Union
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+from Bio.SeqUtils import gc_fraction
 import shutil
 
 from validation_pkg.logger import get_logger
@@ -40,8 +41,48 @@ from validation_pkg.utils.file_handler import open_compressed_writer
 
 @dataclass
 class OutputMetadata:
-    """Metadata returned from genome validation (placeholder for future expansion)."""
-    pass
+    """
+    Metadata returned from genome validation.
+
+    Fields are populated based on validation_level:
+    - minimal: Only output_filename, validation_level, output_file
+    - trust: + num_sequences, longest_sequence_*, plasmid_info, inter-file validation fields
+    - strict: All fields (includes total_genome_size, gc_content, n50)
+
+    Attributes:
+        output_file: Full path to main output file
+        output_filename: Name of main output file
+        num_sequences: Total number of sequences in output
+        total_genome_size: Sum of all sequence lengths in bp (strict only)
+        longest_sequence_length: Length of longest sequence in bp
+        longest_sequence_id: ID of longest sequence
+        gc_content: GC content percentage (0-100) (strict only)
+        n50: N50 assembly quality metric in bp (strict only)
+        plasmid_count: Number of plasmid sequences detected
+        plasmid_filenames: List of plasmid output filenames (if plasmid_split=True)
+        num_sequences_filtered: Number of sequences removed by min_sequence_length filter
+        validation_level: Validation level used ('strict'/'trust'/'minimal')
+
+        # Inter-file validation fields (trust/strict only)
+        sequence_ids: List of sequence IDs for inter-file validation
+        sequence_lengths: Dict mapping sequence IDs to lengths
+    """
+    output_file: str = None
+    output_filename: str = None
+    num_sequences: int = None
+    total_genome_size: int = None  # strict only
+    longest_sequence_length: int = None
+    longest_sequence_id: str = None
+    gc_content: float = None  # strict only
+    n50: int = None  # strict only
+    plasmid_count: int = None
+    plasmid_filenames: List[str] = None
+    num_sequences_filtered: int = None
+    validation_level: str = None
+
+    # Inter-file validation fields
+    sequence_ids: List[str] = None
+    sequence_lengths: dict = None
 
 
 class GenomeValidator:
@@ -158,7 +199,7 @@ class GenomeValidator:
         self.input_path = genome_config.filepath
 
         # From settings
-        self.settings = settings if not None else self.Settings() 
+        self.settings = settings if settings is not None else self.Settings() 
 
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
@@ -167,16 +208,141 @@ class GenomeValidator:
             self.validation_level = 'strict'    #   default global value
 
         if not self.threads:
-            self.threads = 1    #   default global value
+            from validation_pkg.config_manager import DEFAULT_THREADS
+            self.threads = DEFAULT_THREADS    #   default global value
 
-    def run(self) -> dict:
+        # Tracking for metadata
+        self.num_sequences_filtered = 0
+        self.plasmid_filenames = []
+
+    def _calculate_gc_content(self, sequences: List[SeqRecord]) -> float:
+        """
+        Calculate GC content percentage for all sequences using BioPython.
+
+        Args:
+            sequences: List of SeqRecord objects
+
+        Returns:
+            GC content as percentage (0-100)
+        """
+        if not sequences:
+            return 0.0
+
+        total_gc = 0.0
+        total_bases = 0
+
+        for seq in sequences:
+            seq_length = len(seq.seq)
+            if seq_length > 0:
+                # gc_fraction returns value between 0 and 1
+                total_gc += gc_fraction(seq.seq) * seq_length
+                total_bases += seq_length
+
+        if total_bases == 0:
+            return 0.0
+
+        # Return as percentage (0-100)
+        return (total_gc / total_bases) * 100
+
+    def _calculate_n50(self, sequences: List[SeqRecord]) -> int:
+        """
+        Calculate N50 assembly quality metric.
+
+        N50 is the sequence length at which 50% of the total genome size
+        is contained in sequences of that length or longer.
+
+        Args:
+            sequences: List of SeqRecord objects
+
+        Returns:
+            N50 value in base pairs
+        """
+        if not sequences:
+            return 0
+
+        # Get lengths and sort in descending order
+        lengths = sorted([len(seq.seq) for seq in sequences], reverse=True)
+        total_length = sum(lengths)
+
+        # Find N50
+        cumulative_length = 0
+        for length in lengths:
+            cumulative_length += length
+            if cumulative_length >= total_length / 2:
+                return length
+
+        return 0
+
+    def _create_output_metadata(self, output_path: Path) -> OutputMetadata:
+        """
+        Create OutputMetadata object based on validation level.
+
+        Args:
+            output_path: Path to the main output file
+
+        Returns:
+            OutputMetadata object with fields populated based on validation_level
+        """
+        metadata = OutputMetadata()
+        metadata.validation_level = self.validation_level
+        metadata.output_file = str(output_path) if output_path else None
+        metadata.output_filename = output_path.name if output_path else None
+
+        # Minimal mode - only basic info available
+        if self.validation_level == 'minimal':
+            return metadata
+
+        # Trust and Strict modes - sequences were parsed
+        if self.sequences:
+            metadata.num_sequences = len(self.sequences)
+
+            # Find longest sequence
+            if self.sequences:
+                longest_seq = max(self.sequences, key=lambda x: len(x.seq))
+                metadata.longest_sequence_length = len(longest_seq.seq)
+                metadata.longest_sequence_id = str(longest_seq.id)
+
+            # Inter-file validation fields (trust and strict modes)
+            metadata.sequence_ids = [str(seq.id) for seq in self.sequences]
+            metadata.sequence_lengths = {str(seq.id): len(seq.seq) for seq in self.sequences}
+
+        # Plasmid information (available in both trust and strict)
+        if self.plasmid_filenames:
+            metadata.plasmid_count = len(self.plasmid_filenames)
+            metadata.plasmid_filenames = self.plasmid_filenames
+        elif self.num_sequences_filtered > 0:
+            # No plasmids split, but sequences were filtered
+            pass
+
+        metadata.num_sequences_filtered = self.num_sequences_filtered
+
+        # Strict mode only - compute expensive statistics
+        if self.validation_level == 'strict' and self.sequences:
+            # Total genome size
+            metadata.total_genome_size = sum(len(seq.seq) for seq in self.sequences)
+
+            # GC content
+            metadata.gc_content = self._calculate_gc_content(self.sequences)
+
+            # N50
+            metadata.n50 = self._calculate_n50(self.sequences)
+
+        return metadata
+
+    def run(self) -> OutputMetadata:
         """
         Main validation and processing workflow.
 
         Uses genome_config data (format, compression) provided by ConfigManager.
 
         Returns:
-            dict: Empty dict (placeholder for future metadata)
+            OutputMetadata: Metadata object containing:
+                - output_file: Full path to output file
+                - output_filename: Name of output file
+                - Validation statistics (based on validation_level)
+                - Inter-file validation fields (sequence_ids, sequence_lengths)
+
+                All dict-style keys are available as attributes for backward compatibility.
 
         Raises:
             GenomeValidationError: If validation fails
@@ -194,7 +360,7 @@ class GenomeValidator:
 
             self._apply_edits() # include plasmid handle
 
-            self._save_output()
+            output_path = self._save_output()
 
             elapsed = self.logger.stop_timer("genome_validation")
             self.logger.info(f"✓ Genome validation completed in {elapsed:.2f}s")
@@ -206,11 +372,12 @@ class GenomeValidator:
                 elapsed
             )
 
+            # Create and return OutputMetadata
+            return self._create_output_metadata(output_path)
+
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")
             raise
-
-        return {}
 
     def _open_file(self, mode: str = 'rt') -> IO:
         """
@@ -422,6 +589,7 @@ class GenomeValidator:
 
             if len(self.sequences) < original_count:
                 removed = original_count - len(self.sequences)
+                self.num_sequences_filtered = removed  # Track for metadata
                 self.logger.add_validation_issue(
                     level='WARNING',
                     category='genome',
@@ -582,6 +750,9 @@ class GenomeValidator:
             SeqIO.write(plasmid_sequences, handle, 'fasta')
 
         self.logger.info(f"Plasmid sequences saved: {plasmid_path}")
+
+        # Track plasmid filename for metadata
+        self.plasmid_filenames.append(plasmid_filename)
 
         # Log details about each plasmid
         for seq in plasmid_sequences:

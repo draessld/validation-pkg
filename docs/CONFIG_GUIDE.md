@@ -219,10 +219,14 @@ These settings customize validation behavior without modifying code.
 **New in v0.2.0:** Set global defaults that apply to **all files** in your config automatically.
 
 **Allowed global options:**
-- `threads`: Number of threads for parallel processing (positive integer)
-- `validation_level`: `"strict"`, `"trust"`, or `"minimal"`
+- `threads`: Number of threads for parallel processing (positive integer, default: 8)
+  - System automatically detects CPU cores and warns if threads exceed available cores
+  - Example: `"threads": 16` on a 4-core system triggers a warning
+- `validation_level`: `"strict"`, `"trust"`, or `"minimal"` (default: `"strict"`)
+- `logging_level`: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"` (default: `"INFO"`)
+  - Controls console logging verbosity
 
-**Why only these two?** These are the only settings that make sense globally. Other settings like `plasmid_split` or `sort_by_position` are file-specific and should be set per-file.
+**Why only these three?** These are the only settings that make sense globally. Other settings like `plasmid_split` or `sort_by_position` are file-specific and should be set per-file.
 
 **Example:**
 ```json
@@ -233,17 +237,28 @@ These settings customize validation behavior without modifying code.
   ],
   "options": {
     "threads": 8,
-    "validation_level": "trust"
+    "validation_level": "trust",
+    "logging_level": "DEBUG"
   }
 }
 ```
 
-**Result:** ALL files will use `threads=8` and `validation_level='trust'` by default.
+**Result:** ALL files will use `threads=8`, `validation_level='trust'`, and `logging_level='DEBUG'` by default.
+
+**CPU Core Detection:**
+When you specify threads, the system checks available CPU cores:
+```
+INFO: Global option: threads=8 (system has 4 cores available)
+WARNING: Requested 8 threads but system only has 4 CPU cores.
+         Performance may degrade due to context switching overhead.
+         Consider using threads ≤ 4 for optimal performance.
+```
 
 **Validation:**
 - Invalid option names → `ConfigurationError` (e.g., `"plasmid_split"` not allowed)
 - Invalid threads → `ConfigurationError` (e.g., negative numbers)
 - Invalid validation_level → `ConfigurationError` (e.g., `"invalid_level"`)
+- Invalid logging_level → `ConfigurationError` (e.g., `"verbose"`, must be DEBUG/INFO/WARNING/ERROR/CRITICAL)
 
 ### File-Level Settings
 

@@ -20,6 +20,7 @@ Key Features:
 """
 
 import json
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -35,8 +36,13 @@ from validation_pkg.exceptions import (
 # ===== Global Configuration Constants =====
 # Only these fields can be specified in config.json "options" section
 # These are the only settings that make sense to apply globally to all files
-ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level'}
+ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level', 'logging_level'}
 MAX_RECOMMENDED_THREADS = 16
+
+# Default thread count when not specified in config
+# Set to 8 for optimal parallelization performance
+# Developer note: Change this value to adjust default across all validators
+DEFAULT_THREADS = 8
 
 @dataclass
 class GenomeConfig:
@@ -190,7 +196,25 @@ class Config:
             None
         """
         return self.options.get('threads')
-    
+
+    def get_logging_level(self) -> str:
+        """
+        Get logging level from options, or default to 'INFO'.
+
+        Returns:
+            Logging level string ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+
+        Example:
+            >>> config = Config()
+            >>> config.options = {'logging_level': 'DEBUG'}
+            >>> config.get_logging_level()
+            'DEBUG'
+            >>> config.options = {}
+            >>> config.get_logging_level()
+            'INFO'
+        """
+        return self.options.get('logging_level', 'INFO')
+
     def __repr__(self):
         return (
             f"Config(\n"
@@ -546,6 +570,7 @@ class ConfigManager:
         Global options apply to ALL files in the config and can only contain:
         - threads: Number of threads for parallelization (positive integer or null)
         - validation_level: Validation strategy ('strict', 'trust', or 'minimal')
+        - logging_level: Console logging verbosity ('DEBUG', 'INFO', 'WARNING', 'ERROR')
 
         Other settings must be specified per-file in the config, not globally.
 
@@ -591,6 +616,21 @@ class ConfigManager:
                 if threads <= 0:
                     raise ConfigurationError(f"'threads' must be a positive integer, got {threads}")
 
+                # Detect system CPU cores
+                system_cores = os.cpu_count()
+                if system_cores is None:
+                    system_cores_msg = "unknown"
+                else:
+                    system_cores_msg = f"{system_cores} cores"
+
+                # Warn if threads exceed system CPU cores
+                if system_cores and threads > system_cores:
+                    logger.warning(
+                        f"Requested {threads} threads but system only has {system_cores} CPU cores. "
+                        f"Performance may degrade due to context switching overhead. "
+                        f"Consider using threads ≤ {system_cores} for optimal performance."
+                    )
+
                 # Warn if excessive (diminishing returns beyond MAX_RECOMMENDED_THREADS)
                 if threads > MAX_RECOMMENDED_THREADS:
                     logger.warning(
@@ -598,7 +638,7 @@ class ConfigManager:
                         f"Consider using 4-8 threads for optimal performance."
                     )
 
-                logger.info(f"Global option: threads={threads}")
+                logger.info(f"Global option: threads={threads} (system has {system_cores_msg} available)")
                 config.options['threads'] = threads
             else:
                 raise ConfigurationError(
@@ -628,6 +668,31 @@ class ConfigManager:
             config.options['validation_level'] = validation_level
         else:
             logger.debug("validation_level not specified in global options")
+
+        # Parse logging_level option
+        if 'logging_level' in options:
+            logging_level = options['logging_level']
+
+            VALID_LOGGING_LEVELS = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
+
+            if not isinstance(logging_level, str):
+                raise ConfigurationError(
+                    f"'logging_level' must be a string, got {type(logging_level).__name__}: {logging_level}"
+                )
+
+            # Normalize to uppercase
+            logging_level = logging_level.upper()
+
+            if logging_level not in VALID_LOGGING_LEVELS:
+                raise ConfigurationError(
+                    f"Invalid logging_level '{logging_level}'. "
+                    f"Must be one of: {', '.join(sorted(VALID_LOGGING_LEVELS))}"
+                )
+
+            logger.info(f"Global option: logging_level={logging_level}")
+            config.options['logging_level'] = logging_level
+        else:
+            logger.debug("logging_level not specified in global options (default: INFO)")
 
     @staticmethod
     def _merge_options(field_name: str, global_options: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:        

@@ -146,8 +146,9 @@ def get_compression_command(coding_type: CodingType, mode: str = 'compress', thr
     """
     Get the best available compression command for the given coding type.
 
-    Prefers parallel tools (pigz, pbzip2) over standard tools (gzip, bzip2).
-    Falls back gracefully if parallel tools are not available.
+    Prefers parallel tools (pigz, pbzip2) over standard tools (gzip, bzip2)
+    ONLY when threads > 1. With threads=1, uses standard tools for better performance
+    (pigz/pbzip2 have overhead even with 1 thread).
 
     Args:
         coding_type: CodingType enum (GZIP, BZIP2, or NONE)
@@ -160,14 +161,29 @@ def get_compression_command(coding_type: CodingType, mode: str = 'compress', thr
     Example:
         >>> cmd, args = get_compression_command(CodingType.GZIP, 'compress', threads=4)
         >>> # Returns ('pigz', ['-c', '-p', '4']) if pigz available
-        >>> # Otherwise ('gzip', ['-c'])
+        >>> cmd, args = get_compression_command(CodingType.GZIP, 'compress', threads=1)
+        >>> # Returns ('gzip', ['-c']) - standard tool for single thread
     """
     # Default to 1 thread if not specified
     if threads is None:
         threads = 1
 
-    # Select the best available tool
-    tool_name, is_parallel, install_msg = _select_compression_tool(coding_type)
+    # For single thread, always use standard tools (better performance)
+    # Parallel tools have overhead that makes them slower with threads=1
+    if threads == 1:
+        if coding_type == CodingType.GZIP:
+            tool_name = 'gzip'
+            is_parallel = False
+        elif coding_type == CodingType.BZIP2:
+            tool_name = 'bzip2'
+            is_parallel = False
+        else:
+            tool_name = 'cat'
+            is_parallel = False
+        install_msg = None
+    else:
+        # Select the best available tool for multi-threading
+        tool_name, is_parallel, install_msg = _select_compression_tool(coding_type)
 
     # Log tool selection (one-time initialization)
     _log_compression_tool(tool_name, threads, is_parallel, install_msg)

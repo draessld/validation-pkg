@@ -42,6 +42,37 @@ from validation_pkg.exceptions import (
 )
 from validation_pkg.utils.formats import ReadFormat
 from validation_pkg.utils.formats import CodingType as CT
+
+# Constants
+TRUST_MODE_SAMPLE_SIZE = 10  # Number of records to validate in trust mode
+PARALLEL_CHUNK_MULTIPLIER = 4  # Multiplier for calculating chunk size (sequences // (threads * 4))
+MIN_CHUNK_SIZE = 1000  # Minimum chunk size for parallel processing
+
+# Illumina paired-end filename patterns (compiled regex for performance)
+# Pattern format: (regex, read_number_group_index)
+ILLUMINA_PAIRED_END_PATTERNS = [
+    # With lane numbers: _R1_001, _R2_001
+    (re.compile(r'(.+)_(R[12])_\d+$'), 2),
+    # With lane numbers: _1_001, _2_001
+    (re.compile(r'(.+)_([12])_\d+$'), 2),
+    # With arbitrary suffix: _R1_combined, _R2_final
+    (re.compile(r'(.+)_(R[12])_[A-Za-z0-9_]+$'), 2),
+    # With arbitrary suffix (no R prefix): _1_combined, _2_final
+    (re.compile(r'(.+)_([12])_[A-Za-z0-9_]+$'), 2),
+    # No separator with suffix: sampleR1_combined
+    (re.compile(r'(.+)(R[12])_[A-Za-z0-9_]+$'), 2),
+    # Standard Illumina: _R1, _R2
+    (re.compile(r'(.+)_(R[12])$'), 2),
+    # SRA style: _1, _2
+    (re.compile(r'(.+)_([12])$'), 2),
+    # Dot separator: .R1, .R2
+    (re.compile(r'(.+)\.(R[12])$'), 2),
+    # Dot with numbers: .1, .2
+    (re.compile(r'(.+)\.([12])$'), 2),
+    # No separator (must be at end): sampleR1, sampleR2
+    (re.compile(r'(.+)(R[12])$'), 2),
+]
+
 from validation_pkg.utils.file_handler import (
     bz2_to_gz,
     none_to_gz,
@@ -170,15 +201,41 @@ class ReadValidator:
         """
         Metadata returned from read validation.
 
+        Fields are populated based on validation_level:
+        - minimal: Only output_file, output_filename, validation_level
+        - trust: + num_reads, Illumina pattern info
+        - strict: All fields (includes n50, total_bases, mean_read_length)
+
         Attributes:
-            pairing_info: Illumina paired-end pattern detection result
-                Contains: {'base_name': str, 'read_number': int, 'pattern': str} or None
+            output_file: Full path to main output file
+            output_filename: Name of output file
+            base_name: Illumina paired-end base name (pattern detection)
+            read_number: Illumina read number (1 or 2) from pattern detection
             ngs_type_detected: NGS platform type from read header
-            # Future fields can be added here without breaking changes
+            num_reads: Total number of reads in output
+            validation_level: Validation level used ('strict'/'trust'/'minimal')
+
+            # Strict mode only statistics:
+            n50: N50 read length metric in bp (strict only)
+            total_bases: Sum of all read lengths in bp (strict only)
+            mean_read_length: Average read length in bp (strict only)
+            longest_read_length: Length of longest read in bp (strict only)
+            shortest_read_length: Length of shortest read in bp (strict only)
         """
+        output_file: str = None
+        output_filename: str = None
         base_name: str = None
         read_number: int = None
         ngs_type_detected: str = None
+        num_reads: int = None
+        validation_level: str = None
+
+        # Strict mode statistics
+        n50: int = None
+        total_bases: int = None
+        mean_read_length: float = None
+        longest_read_length: int = None
+        shortest_read_length: int = None
 
     def __init__(self, read_config, settings: Optional[Settings] = None) -> None:
         """
@@ -200,7 +257,7 @@ class ReadValidator:
         self.input_path = read_config.filepath
 
         # From settings
-        self.settings = settings if not None else self.Settings() 
+        self.settings = settings if settings is not None else self.Settings() 
         self.output_metadata = self.OutputMetadata()
 
         # Parsed data
@@ -210,13 +267,52 @@ class ReadValidator:
             self.validation_level = 'strict'    #   default global value
 
         if not self.threads:
-            self.threads = 1    #   default global value
+            from validation_pkg.config_manager import DEFAULT_THREADS
+            self.threads = DEFAULT_THREADS    #   default global value
 
         # Apply outdir_by_ngs_type if enabled
         if self.settings.outdir_by_ngs_type:
             # Override output_subdir_name with ngs_type
             self.settings = self.settings.update(output_subdir_name=self.read_config.ngs_type)
             self.logger.debug(f"Applied outdir_by_ngs_type: output_subdir_name set to '{self.read_config.ngs_type}'")
+
+    def _calculate_read_statistics(self) -> dict:
+        """
+        Calculate read statistics for strict mode.
+
+        Returns:
+            dict with keys: n50, total_bases, mean_read_length, longest_read_length, shortest_read_length
+        """
+        if not self.sequences:
+            return {
+                'n50': 0,
+                'total_bases': 0,
+                'mean_read_length': 0.0,
+                'longest_read_length': 0,
+                'shortest_read_length': 0
+            }
+
+        # Get read lengths
+        lengths = [len(seq.seq) for seq in self.sequences]
+
+        # Calculate N50
+        sorted_lengths = sorted(lengths, reverse=True)
+        total_length = sum(sorted_lengths)
+        cumulative_length = 0
+        n50 = 0
+        for length in sorted_lengths:
+            cumulative_length += length
+            if cumulative_length >= total_length / 2:
+                n50 = length
+                break
+
+        return {
+            'n50': n50,
+            'total_bases': total_length,
+            'mean_read_length': total_length / len(lengths) if lengths else 0.0,
+            'longest_read_length': max(lengths) if lengths else 0,
+            'shortest_read_length': min(lengths) if lengths else 0
+        }
 
     def run(self) -> OutputMetadata:
         """
@@ -227,6 +323,14 @@ class ReadValidator:
         Workflow differs based on input format:
         - FASTQ: Parse → Validate → Edit → Save
         - BAM: Copy original → Convert to FASTQ → Parse → Validate → Edit → Save
+
+        Returns:
+            OutputMetadata: Metadata object containing:
+                - output_file: Full path to output file
+                - output_filename: Name of output file
+                - Illumina pattern detection (base_name, read_number)
+                - num_reads: Total number of reads
+                - validation_level: Validation mode used
 
         Raises:
             ReadValidationError: If validation fails
@@ -256,7 +360,7 @@ class ReadValidator:
                 self._apply_edits()
 
                 # Step 6: Save FASTQ output
-                self._save_output()
+                output_path = self._save_output()
 
             else:
                 # Standard FASTQ workflow
@@ -274,7 +378,7 @@ class ReadValidator:
                     self._detect_illumina_pattern(self.read_config.filename)
 
                 # Step 4: Save to output directory (already FASTQ)
-                self._save_output()
+                output_path = self._save_output()
 
             elapsed = self.logger.stop_timer("read_validation")
             self.logger.info(f"✓ Read validation completed in {elapsed:.2f}s")
@@ -286,11 +390,26 @@ class ReadValidator:
                 elapsed
             )
 
+            # Populate and return OutputMetadata
+            self.output_metadata.output_file = str(output_path)
+            self.output_metadata.output_filename = output_path.name
+            self.output_metadata.num_reads = len(self.sequences)
+            self.output_metadata.validation_level = self.validation_level
+
+            # Calculate read statistics in strict mode only
+            if self.validation_level == 'strict' and self.sequences:
+                stats = self._calculate_read_statistics()
+                self.output_metadata.n50 = stats['n50']
+                self.output_metadata.total_bases = stats['total_bases']
+                self.output_metadata.mean_read_length = stats['mean_read_length']
+                self.output_metadata.longest_read_length = stats['longest_read_length']
+                self.output_metadata.shortest_read_length = stats['shortest_read_length']
+
+            return self.output_metadata
+
         except Exception as e:
             self.logger.error(f"Read validation failed: {e}")
             raise
-
-        return asdict(self.output_metadata)
 
     def _open_file(self, mode: str = 'rt') -> IO:
         """
@@ -460,11 +579,11 @@ class ReadValidator:
             self.sequences = []
             return
 
-        # Trust mode: Parse only first 10 sequences for validation
+        # Trust mode: Parse only first TRUST_MODE_SAMPLE_SIZE sequences for validation
         # Strict mode: Parse all sequences
         if self.validation_level == 'trust':
-            self.logger.info("Trust mode - parsing first 10 sequences only for validation")
-            parse_limit = 10
+            self.logger.info(f"Trust mode - parsing first {TRUST_MODE_SAMPLE_SIZE} sequences only for validation")
+            parse_limit = TRUST_MODE_SAMPLE_SIZE
         else:
             # Strict mode - parse all
             parse_limit = None
@@ -586,65 +705,57 @@ class ReadValidator:
 
         # Parallel validation (strict mode with threads > 1)
         if use_parallel:
-            # Enable parallel logging mode (adds process_id and thread_id to logs)
-            self.logger.enable_parallel_logging()
+            # Determine chunk size: MIN_CHUNK_SIZE records per chunk, or split into PARALLEL_CHUNK_MULTIPLIER chunks per worker
+            chunk_size = max(MIN_CHUNK_SIZE, validate_count // (self.threads * PARALLEL_CHUNK_MULTIPLIER))
 
-            try:
-                # Determine chunk size: min 1000 records per chunk, or split into 4 chunks per worker
-                chunk_size = max(1000, validate_count // (self.threads * 4))
+            self.logger.debug(
+                f"Parallel processing configuration: {self.threads} workers, chunk_size={chunk_size:,}",
+                workers=self.threads,
+                chunk_size=chunk_size,
+                estimated_chunks=validate_count // chunk_size
+            )
 
-                self.logger.debug(
-                    f"Parallel processing configuration: {self.threads} workers, chunk_size={chunk_size:,}",
-                    workers=self.threads,
-                    chunk_size=chunk_size,
-                    estimated_chunks=validate_count // chunk_size
-                )
+            # Create partial function with settings
+            validator_func = partial(
+                _validate_single_read,
+                check_invalid_chars=self.settings.check_invalid_chars,
+                allow_empty_id=self.settings.allow_empty_id
+            )
 
-                # Create partial function with settings
-                validator_func = partial(
-                    _validate_single_read,
-                    check_invalid_chars=self.settings.check_invalid_chars,
-                    allow_empty_id=self.settings.allow_empty_id
-                )
+            # Validate in parallel
+            self.logger.debug(f"Starting parallel validation across {self.threads} worker processes...")
+            with Pool(processes=self.threads) as pool:
+                results = pool.map(validator_func, self.sequences[:validate_count], chunksize=chunk_size)
 
-                # Validate in parallel
-                self.logger.debug(f"Starting parallel validation across {self.threads} worker processes...")
-                with Pool(processes=self.threads) as pool:
-                    results = pool.map(validator_func, self.sequences[:validate_count], chunksize=chunk_size)
+            self.logger.debug(
+                f"Parallel validation completed: {validate_count:,} sequences processed",
+                sequences_validated=validate_count
+            )
 
-                self.logger.debug(
-                    f"Parallel validation completed: {validate_count:,} sequences processed",
-                    sequences_validated=validate_count
-                )
+            # Collect errors
+            errors = []
+            for idx, result in enumerate(results):
+                if 'error' in result:
+                    # Add index to details if missing
+                    if result['details'].get('sequence_index') is None:
+                        result['details']['sequence_index'] = idx
 
-                # Collect errors
-                errors = []
-                for idx, result in enumerate(results):
-                    if 'error' in result:
-                        # Add index to details if missing
-                        if result['details'].get('sequence_index') is None:
-                            result['details']['sequence_index'] = idx
+                    # Log validation issue
+                    self.logger.add_validation_issue(
+                        level='ERROR',
+                        category='read',
+                        message=f"Sequence '{result['record_id']}': {result['error']}",
+                        details=result['details']
+                    )
+                    errors.append(result)
 
-                        # Log validation issue
-                        self.logger.add_validation_issue(
-                            level='ERROR',
-                            category='read',
-                            message=f"Sequence '{result['record_id']}': {result['error']}",
-                            details=result['details']
-                        )
-                        errors.append(result)
-
-                # Raise if any errors found
-                if errors:
-                    error_msg = f"{len(errors)} validation error(s) found in sequences (parallel validation)"
-                    self.logger.error(error_msg, error_count=len(errors), total_sequences=validate_count)
-                    raise ReadValidationError(error_msg)
-                else:
-                    self.logger.info(f"✓ All {validate_count:,} sequences validated successfully (parallel mode)")
-
-            finally:
-                # Always disable parallel logging mode when done
-                self.logger.disable_parallel_logging()
+            # Raise if any errors found
+            if errors:
+                error_msg = f"{len(errors)} validation error(s) found in sequences (parallel validation)"
+                self.logger.error(error_msg, error_count=len(errors), total_sequences=validate_count)
+                raise ReadValidationError(error_msg)
+            else:
+                self.logger.info(f"✓ All {validate_count:,} sequences validated successfully (parallel mode)")
 
         # Sequential validation (trust mode or single-threaded)
         else:
@@ -685,9 +796,12 @@ class ReadValidator:
 
         # Check for duplicate IDs (always sequential - requires full list)
         if not self.settings.allow_duplicate_ids:
+            from collections import Counter
             seq_ids = [record.id for record in self.sequences]
             if len(seq_ids) != len(set(seq_ids)):
-                duplicates = [sid for sid in set(seq_ids) if seq_ids.count(sid) > 1]
+                # Use Counter for O(n) instead of O(n²) duplicate detection
+                id_counts = Counter(seq_ids)
+                duplicates = [sid for sid, count in id_counts.items() if count > 1]
                 error_msg = f"Duplicate sequence IDs not allowed: {duplicates}"
                 self.logger.add_validation_issue(
                     level='ERROR',
@@ -1116,13 +1230,35 @@ class ReadValidator:
             self.logger.info(f"Output saved: {output_path}")
             return output_path
 
-        # Strict mode - write sequences using BioPython (original behavior)
-        # Write output with appropriate compression
-        self.logger.debug(f"Writing output to: {output_path}")
+        # Strict mode - optimize based on whether edits were applied
+        # If input is FASTQ, coding matches, and no edits were made, use simple copy
+        # Otherwise, write sequences using BioPython
 
-        # Use optimized compression writer
-        with open_compressed_writer(output_path, coding, threads=self.threads) as handle:
-            SeqIO.write(self.sequences, handle, 'fastq')
+        input_coding = self.read_config.coding_type
+        output_coding = coding
+        input_format = self.read_config.detected_format
+
+        # Check if we can use optimized copy (no edits, same format and coding)
+        # Note: Currently _apply_edits() does nothing, so no edits are ever made
+        # In the future, check if edits were actually applied (e.g., sequences removed/modified)
+        can_optimize = (
+            input_format == ReadFormat.FASTQ and  # Input is FASTQ
+            input_coding == output_coding  # Compression matches
+            # Future: add check for "no edits were actually applied"
+        )
+
+        if can_optimize:
+            # Optimized path: simple copy (no need to parse/write)
+            self.logger.debug(f"Optimized copy: {self.input_path} to {output_path} (no edits, same format/coding)")
+            shutil.copy2(self.input_path, output_path)
+        else:
+            # Standard path: write sequences using BioPython
+            # Used when: BAM conversion, compression change, or future edits
+            self.logger.debug(f"Writing output to: {output_path}")
+
+            # Use optimized compression writer
+            with open_compressed_writer(output_path, coding, threads=self.threads) as handle:
+                SeqIO.write(self.sequences, handle, 'fastq')
 
         self.logger.info(f"Output saved: {output_path}")
 
@@ -1147,33 +1283,9 @@ class ReadValidator:
         # Strip only the last 2 extensions (format + compression)
         base = self.read_config.basename
 
-        # Define patterns in priority order (most specific first)
-        # Pattern format: (regex, read_number_group_index)
-        patterns = [
-            # With lane numbers: _R1_001, _R2_001
-            (r'(.+)_(R[12])_\d+$', 2),
-            # With lane numbers: _1_001, _2_001
-            (r'(.+)_([12])_\d+$', 2),
-            # With arbitrary suffix: _R1_combined, _R2_final
-            (r'(.+)_(R[12])_[A-Za-z0-9_]+$', 2),
-            # With arbitrary suffix (no R prefix): _1_combined, _2_final
-            (r'(.+)_([12])_[A-Za-z0-9_]+$', 2),
-            # No separator with suffix: sampleR1_combined
-            (r'(.+)(R[12])_[A-Za-z0-9_]+$', 2),
-            # Standard Illumina: _R1, _R2
-            (r'(.+)_(R[12])$', 2),
-            # SRA style: _1, _2
-            (r'(.+)_([12])$', 2),
-            # Dot separator: .R1, .R2
-            (r'(.+)\.(R[12])$', 2),
-            # Dot with numbers: .1, .2
-            (r'(.+)\.([12])$', 2),
-            # No separator (must be at end): sampleR1, sampleR2
-            (r'(.+)(R[12])$', 2),
-        ]
-
-        for pattern, read_group_idx in patterns:
-            match = re.match(pattern, base)
+        # Use pre-compiled patterns from module-level constant
+        for pattern, read_group_idx in ILLUMINA_PAIRED_END_PATTERNS:
+            match = pattern.match(base)
             if match:
                 base_name = match.group(1)
                 read_indicator = match.group(read_group_idx)
