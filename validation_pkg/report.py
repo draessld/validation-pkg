@@ -149,9 +149,11 @@ class ValidationReport:
                     output_file = single_result.get('output_file', 'unknown')
                     output_metadata_dict = single_result.get('metadata') or single_result.get('output_metadata', {})
 
-                # Extract input filename if not provided
-                if input_file is None:
-                    input_file = Path(output_file).name if output_file else 'unknown'
+                # Extract input filename for THIS specific result
+                # Use per-iteration variable to avoid reusing first file's name for all results
+                current_input_file = input_file
+                if current_input_file is None:
+                    current_input_file = Path(output_file).name if output_file else 'unknown'
 
                 # Serialize settings if provided
                 settings_dict = None
@@ -160,7 +162,7 @@ class ValidationReport:
 
                 # Create file record
                 record = FileValidationRecord(
-                    input_file=input_file,
+                    input_file=current_input_file,
                     validator_type=file_type,
                     input_settings=settings_dict,
                     output_file=output_file,
@@ -217,7 +219,7 @@ class ValidationReport:
 
         # Header
         lines.append("=" * 100)
-        lines.append("BIOINFORMATICS VALIDATION REPORT".center(100))
+        lines.append("VALIDATION PIPELINE REPORT".center(100))
         lines.append("=" * 100)
         lines.append(f"Generated: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Total Duration: {duration:.2f}s")
@@ -421,6 +423,22 @@ class ValidationReport:
             if 'base_name' in metadata and 'read_number' in metadata:
                 if metadata['base_name'] and metadata['read_number']:
                     lines.append(f"  Paired-End: R{metadata['read_number']} (base: {metadata['base_name']})")
+
+            # Read statistics
+            if 'total_bases' in metadata:
+                lines.append(f"  Total Bases: {metadata['total_bases']:,} bp")
+
+            if 'mean_read_length' in metadata:
+                lines.append(f"  Mean Read Length: {metadata['mean_read_length']:.1f} bp")
+
+            if 'n50' in metadata:
+                lines.append(f"  N50: {metadata['n50']:,} bp")
+
+            if 'longest_read_length' in metadata:
+                lines.append(f"  Longest Read: {metadata['longest_read_length']:,} bp")
+
+            if 'shortest_read_length' in metadata:
+                lines.append(f"  Shortest Read: {metadata['shortest_read_length']:,} bp")
 
         elif validator_type == "feature":
             # Feature-specific metadata

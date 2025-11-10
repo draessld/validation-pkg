@@ -294,6 +294,13 @@ class ConfigManager:
             ConfigManager._validate_required_fields(data)
             logger.debug("Parsing options...")
             ConfigManager._parse_options(data, config)
+
+            # Reconfigure logging level based on config options (if specified)
+            if config.options and 'logging_level' in config.options:
+                logging_level = config.options['logging_level']
+                logger.info(f"Applying logging level from config: {logging_level}")
+                logger.reconfigure_level(console_level=logging_level)
+
             logger.debug("Setup base for outputs")
             ConfigManager._setup_output_directory(config)
             logger.debug("Parsing genome configurations...")

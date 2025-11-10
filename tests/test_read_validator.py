@@ -1528,10 +1528,10 @@ class TestIlluminaPatternDetection:
         validator = self._create_validator_with_basename("SRR834393.fq.gz")
 
         validator._detect_illumina_pattern("SRR834393.fq.gz")
-        # No pattern should be detected - metadata should remain None
-        assert validator.output_metadata.base_name is None
-        assert validator.output_metadata.read_number is None
-        assert validator.output_metadata.ngs_type_detected is None
+        # No paired-end pattern - should set fallback metadata for single-end
+        assert validator.output_metadata.base_name == "SRR834393"
+        assert validator.output_metadata.read_number == 1  # Defaults to R1
+        assert validator.output_metadata.ngs_type_detected == 'illumina'
 
     def test_sra_style_underscore_suffix(self):
         """Test SRA-style filenames with _1/_2 suffix."""
@@ -1805,47 +1805,50 @@ class TestIlluminaPatternDetection:
     # ==================== Invalid Patterns ====================
 
     def test_invalid_read_numbers(self):
-        """Test that invalid read numbers (not 1 or 2) are not matched."""
-        # R3 is not valid (only R1 and R2 are valid)
+        """Test that invalid read numbers get fallback metadata (treated as single-end)."""
+        # R3 is not valid (only R1 and R2 are valid) - treated as single-end
         validator1 = self._create_validator_with_basename("sample_R3.fastq")
         validator1._detect_illumina_pattern("sample_R3.fastq")
-        assert validator1.output_metadata.base_name is None
-        assert validator1.output_metadata.read_number is None
-        assert validator1.output_metadata.ngs_type_detected is None
+        assert validator1.output_metadata.base_name == "sample_R3"
+        assert validator1.output_metadata.read_number == 1  # Fallback
+        assert validator1.output_metadata.ngs_type_detected == 'illumina'
 
-        # _3 is not valid
+        # _3 is not valid - treated as single-end
         validator2 = self._create_validator_with_basename("sample_3.fastq")
         validator2._detect_illumina_pattern("sample_3.fastq")
-        assert validator2.output_metadata.base_name is None
-        assert validator2.output_metadata.read_number is None
+        assert validator2.output_metadata.base_name == "sample_3"
+        assert validator2.output_metadata.read_number == 1  # Fallback
 
-        # R0 is not valid
+        # R0 is not valid - treated as single-end
         validator3 = self._create_validator_with_basename("sample_R0.fastq")
         validator3._detect_illumina_pattern("sample_R0.fastq")
-        assert validator3.output_metadata.base_name is None
+        assert validator3.output_metadata.base_name == "sample_R0"
 
     def test_invalid_ambiguous_patterns(self):
-        """Test that ambiguous or malformed patterns are not matched."""
+        """Test that ambiguous patterns get fallback metadata."""
         # Just R1 without base name (edge case - might match with empty base_name)
         validator1 = self._create_validator_with_basename("R1.fastq")
         validator1._detect_illumina_pattern("R1.fastq")
-        # This should either not match OR match with empty base_name
-        if validator1.output_metadata.read_number is not None:
-            assert validator1.output_metadata.base_name == ""
+        # Pattern should match with empty base_name OR fallback to full basename
+        assert validator1.output_metadata.read_number is not None
+        assert validator1.output_metadata.ngs_type_detected == 'illumina'
 
-        # R1 in middle of filename (not at end)
+        # R1 in middle of filename (not at end) - treated as single-end
         validator2 = self._create_validator_with_basename("R1_sample.fastq")
         validator2._detect_illumina_pattern("R1_sample.fastq")
-        # Should not match standard patterns since R1 is not at end
-        assert validator2.output_metadata.read_number is None
+        # Should not match standard patterns, gets fallback
+        assert validator2.output_metadata.base_name == "R1_sample"
+        assert validator2.output_metadata.read_number == 1  # Fallback
+        assert validator2.output_metadata.ngs_type_detected == 'illumina'
 
     def test_invalid_lowercase_r_prefix(self):
-        """Test that lowercase 'r' prefix is not matched (Illumina uses uppercase R)."""
+        """Test that lowercase 'r' gets fallback metadata (not a valid pattern)."""
         validator = self._create_validator_with_basename("sample_r1.fastq")
         validator._detect_illumina_pattern("sample_r1.fastq")
-        # Should not match - Illumina uses uppercase R1/R2
-        assert validator.output_metadata.base_name is None
-        assert validator.output_metadata.read_number is None
+        # Should not match - Illumina uses uppercase R1/R2, gets fallback
+        assert validator.output_metadata.base_name == "sample_r1"
+        assert validator.output_metadata.read_number == 1  # Fallback
+        assert validator.output_metadata.ngs_type_detected == 'illumina'
 
     # ==================== Metadata Isolation Tests ====================
 
@@ -1871,14 +1874,14 @@ class TestIlluminaPatternDetection:
         assert validator2.output_metadata.read_number == 2
 
     def test_metadata_cleared_when_no_pattern(self):
-        """Test that metadata remains None when no pattern is detected."""
+        """Test that fallback metadata is set when no paired-end pattern is detected."""
         validator = self._create_validator_with_basename("single_end_sample.fastq.gz")
 
-        # Should remain None after detection (no pattern)
+        # Should set fallback metadata for single-end files
         validator._detect_illumina_pattern("single_end_sample.fastq.gz")
-        assert validator.output_metadata.base_name is None
-        assert validator.output_metadata.read_number is None
-        assert validator.output_metadata.ngs_type_detected is None
+        assert validator.output_metadata.base_name == "single_end_sample"
+        assert validator.output_metadata.read_number == 1
+        assert validator.output_metadata.ngs_type_detected == 'illumina'
 
 
 class TestReadStatistics:

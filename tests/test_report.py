@@ -491,7 +491,7 @@ class TestTextReportGeneration:
         report.flush(format='text')
 
         content = temp_report_path.read_text()
-        assert "BIOINFORMATICS VALIDATION REPORT" in content
+        assert "VALIDATION PIPELINE REPORT" in content
         assert "SUMMARY" in content
         assert "Generated:" in content
         assert "Total Duration:" in content
@@ -538,7 +538,7 @@ class TestTextReportGeneration:
         report.flush(format='text')
 
         content = temp_report_path.read_text()
-        assert "BIOINFORMATICS VALIDATION REPORT" in content
+        assert "VALIDATION PIPELINE REPORT" in content
         assert "Files Processed: 0" in content
 
 

@@ -1301,4 +1301,20 @@ class ReadValidator:
                 self.output_metadata.base_name = base_name
                 self.output_metadata.read_number = read_number
                 self.output_metadata.ngs_type_detected = 'illumina'
-                break  # Stop after first match
+
+                if hasattr(self, 'logger') and self.logger:
+                    self.logger.debug(
+                        f"Detected Illumina paired-end pattern: {base_name}_R{read_number}"
+                    )
+                return  # Early return after successful match
+
+        # No paired-end pattern matched - fallback for single-end or non-standard naming
+        # Always set ngs_type_detected for Illumina files, even without pairing info
+        self.output_metadata.base_name = base
+        self.output_metadata.read_number = 1  # Default to R1 for single-end
+        self.output_metadata.ngs_type_detected = 'illumina'
+
+        if hasattr(self, 'logger') and self.logger:
+            self.logger.debug(
+                f"No paired-end pattern detected in '{base}' - treating as single-end R1"
+            )

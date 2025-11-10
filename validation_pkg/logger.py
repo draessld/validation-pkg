@@ -275,6 +275,75 @@ class ValidationLogger:
         if report_file:
             self.info(f"Validation report will be saved to: {report_file}")
 
+    def reconfigure_level(
+        self,
+        console_level: str = "INFO",
+        enable_file_logging: bool = True,
+        log_file: Optional[Path] = None
+    ):
+        """
+        Reconfigure logging level after initial setup.
+
+        This method allows changing the logging level after the logger has been
+        initially configured, useful for applying user-specified logging levels
+        from config files.
+
+        Args:
+            console_level: New console logging level (DEBUG, INFO, WARNING, ERROR)
+            enable_file_logging: Whether to enable file logging
+            log_file: Path to log file (if enabling file logging and not already set)
+
+        Note:
+            This updates existing handlers rather than recreating the entire logger.
+        """
+        console_level_upper = console_level.upper()
+
+        # Check if we're using stdlib logging (has handlers)
+        stdlib_logger = logging.getLogger("validation_pipeline")
+
+        if stdlib_logger.handlers:
+            # Update existing handlers
+            for handler in stdlib_logger.handlers:
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    # Console handler
+                    handler.setLevel(getattr(logging, console_level_upper))
+                    self.debug(f"Updated console logging level to {console_level_upper}")
+
+            # If file logging should be disabled, remove file handler
+            if not enable_file_logging:
+                stdlib_logger.handlers = [
+                    h for h in stdlib_logger.handlers
+                    if not isinstance(h, logging.FileHandler)
+                ]
+        else:
+            # Using PrintLogger - need to reconfigure structlog
+            processors = [
+                structlog.contextvars.merge_contextvars,
+                structlog.processors.add_log_level,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.StackInfoRenderer(),
+                structlog.processors.format_exc_info,
+            ]
+
+            console_processors = processors + [
+                format_process_info,
+                add_log_level_colors,
+                structlog.dev.ConsoleRenderer(colors=True)
+            ]
+
+            structlog.configure(
+                processors=console_processors,
+                wrapper_class=structlog.make_filtering_bound_logger(
+                    getattr(structlog.stdlib.logging, console_level_upper, structlog.stdlib.logging.INFO)
+                ),
+                context_class=dict,
+                logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+                cache_logger_on_first_use=False,
+            )
+
+            # Get new logger instance
+            self.logger = structlog.get_logger("validation_pipeline")
+
     def debug(self, message: str, **kwargs):
         """Log debug message with optional structured context."""
         if self.logger:
