@@ -3,21 +3,10 @@ Inter-file validation for genome files.
 
 Provides validation functions for checking consistency between genome
 files, such as comparing reference vs modified genomes.
-
-Usage:
-    from validation_pkg import validate_genome, genomexgenome_validation, GenomeXGenomeSettings
-
-    # Validate individual files
-    ref_result = validate_genome(config.ref_genome, ref_settings)
-    mod_result = validate_genome(config.mod_genome, mod_settings)
-
-    # Check inter-genome consistency
-    settings = GenomeXGenomeSettings(same_number_of_sequences=True)
-    result = genomexgenome_validation(ref_result, mod_result, settings)
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Union
+from typing import Dict, Optional, Any
 from ..utils.settings import BaseSettings
 from ..exceptions import GenomeValidationError
 from ..logger import get_logger
@@ -28,9 +17,6 @@ def _get_metadata_field(metadata_obj, field_name, default=None):
     if hasattr(metadata_obj, field_name):
         # OutputMetadata object - use attribute access
         return getattr(metadata_obj, field_name, default)
-    else:
-        # Dict - use get()
-        return metadata_obj.get(field_name, default)
 
 
 @dataclass
@@ -76,30 +62,10 @@ def genomexgenome_validation(
         settings: Validation settings (uses defaults if not provided)
 
     Returns:
-        Dict with validation results and metadata:
-        {
-            'passed': bool,
-            'warnings': List[str],
-            'errors': List[str],
-            'metadata': {
-                'ref_num_sequences': int,
-                'mod_num_sequences': int,
-                'common_sequence_ids': List[str],
-                'ref_only_ids': List[str],
-                'mod_only_ids': List[str],
-                'length_mismatches': Dict[str, Dict]
-            }
-        }
+        Dict with validation results and metadata
 
     Raises:
         GenomeValidationError: If critical validation fails
-
-    Example:
-        >>> ref_result = validate_genome(config.ref_genome, settings)
-        >>> mod_result = validate_genome(config.mod_genome, settings)
-        >>> result = genomexgenome_validation(ref_result, mod_result)
-        >>> if not result['passed']:
-        ...     print(f"Errors: {result['errors']}")
     """
     settings = settings or GenomeXGenomeSettings()
     logger = get_logger()
@@ -109,24 +75,9 @@ def genomexgenome_validation(
 
     logger.info("Running inter-file validation: genome-to-genome consistency")
 
-    # Extract metadata - handle both OutputMetadata objects and dicts (backward compatibility)
-    if hasattr(ref_genome_result, 'num_sequences'):
-        # New OutputMetadata object - use it directly
-        ref_meta = ref_genome_result
-    else:
-        # Old dict format
-        if 'metadata' not in ref_genome_result:
-            raise GenomeValidationError("Reference genome result missing 'metadata' field")
-        ref_meta = ref_genome_result['metadata']
-
-    if hasattr(mod_genome_result, 'num_sequences'):
-        # New OutputMetadata object - use it directly
-        mod_meta = mod_genome_result
-    else:
-        # Old dict format
-        if 'metadata' not in mod_genome_result:
-            raise GenomeValidationError("Modified genome result missing 'metadata' field")
-        mod_meta = mod_genome_result['metadata']
+    # Extract metadata from OutputMetadata objects
+    ref_meta = ref_genome_result
+    mod_meta = mod_genome_result
 
     # Initialize result metadata
     metadata = {

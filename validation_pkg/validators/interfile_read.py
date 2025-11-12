@@ -57,28 +57,10 @@ def readxread_validation(
         settings: Validation settings (uses defaults if not provided)
 
     Returns:
-        Dict with validation results and metadata:
-        {
-            'passed': bool,
-            'warnings': List[str],
-            'errors': List[str],
-            'metadata': {
-                'pairs_checked': int,
-                'complete_pairs': List[str],
-                'missing_r1': List[str],
-                'duplicate_r1': List[str],
-                'duplicate_r2': List[str]
-            }
-        }
+        Dict with validation results and metadata
 
     Raises:
         ReadValidationError: If critical validation fails (missing R1 for R2)
-
-    Example:
-        >>> reads_results = validate_reads(config.reads, read_settings)
-        >>> result = readxread_validation(reads_results, ReadXReadSettings())
-        >>> if not result['passed']:
-        ...     print(f"Errors: {result['errors']}")
     """
     settings = settings or ReadXReadSettings()
     logger = get_logger()
@@ -104,27 +86,14 @@ def readxread_validation(
             'metadata': metadata
         }
 
-    # Extract metadata from results
+    # Extract metadata from results (OutputMetadata objects)
     read_metadata = []
     for result in reads_results:
-        # Handle both OutputMetadata objects and dicts (backward compatibility)
-        if hasattr(result, 'output_file'):
-            # New OutputMetadata object
-            output_file = result.output_file or 'unknown'
-            base_name = result.base_name
-            read_number = result.read_number
-            ngs_type_detected = result.ngs_type_detected
-        else:
-            # Old dict format
-            if 'output_metadata' not in result:
-                logger.warning(f"Result missing output_metadata, skipping: {result.get('output_file', 'unknown')}")
-                continue
-
-            meta = result['output_metadata']
-            output_file = result.get('output_file', 'unknown')
-            base_name = meta.get('base_name')
-            read_number = meta.get('read_number')
-            ngs_type_detected = meta.get('ngs_type_detected')
+        # Extract fields from OutputMetadata object
+        output_file = result.output_file or 'unknown'
+        base_name = result.base_name
+        read_number = result.read_number
+        ngs_type_detected = result.ngs_type_detected
 
         # Skip if no pattern detected (not paired-end or not Illumina)
         if read_number is None:

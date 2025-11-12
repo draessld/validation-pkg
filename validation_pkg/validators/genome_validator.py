@@ -107,13 +107,6 @@ class GenomeValidator:
         output_dir: Directory for output files
         settings: Settings object controlling validation and processing behavior
         sequences: List of parsed SeqRecord objects (populated during validation)
-
-    Example:
-        >>> from validation_pkg import ConfigManager, GenomeValidator
-        >>> config = ConfigManager.load("config.json")
-        >>> settings = GenomeValidator.Settings(validation_level='trust', plasmid_split=True)
-        >>> validator = GenomeValidator(config.ref_genome, config.output_dir, settings)
-        >>> validator.validate()
     """
 
     @dataclass

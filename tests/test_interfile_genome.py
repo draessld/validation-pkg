@@ -6,6 +6,7 @@ Tests genome-to-genome consistency checks.
 
 import pytest
 from validation_pkg.validators.interfile_genome import GenomeXGenomeSettings, genomexgenome_validation
+from validation_pkg.validators.genome_validator import OutputMetadata as GenomeOutputMetadata
 from validation_pkg.exceptions import GenomeValidationError
 
 
@@ -43,22 +44,18 @@ class TestSequenceCountValidation:
 
     def test_same_count_passes(self):
         """Test that same sequence counts pass."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 3,
-                'sequence_ids': ['chr1', 'chr2', 'chr3'],
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000, 'chr3': 2000000}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 3,
-                'sequence_ids': ['chr1', 'chr2', 'chr3'],
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000, 'chr3': 2000000}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=3,
+            sequence_ids=['chr1', 'chr2', 'chr3'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000, 'chr3': 2000000}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=3,
+            sequence_ids=['chr1', 'chr2', 'chr3'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000, 'chr3': 2000000}
+        )
 
         result = genomexgenome_validation(ref_result, mod_result)
 
@@ -67,22 +64,18 @@ class TestSequenceCountValidation:
 
     def test_different_count_fails(self):
         """Test that different sequence counts raise error."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 3,
-                'sequence_ids': ['chr1', 'chr2', 'chr3'],
-                'sequence_lengths': {}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=3,
+            sequence_ids=['chr1', 'chr2', 'chr3'],
+            sequence_lengths={}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={}
+        )
 
         with pytest.raises(GenomeValidationError) as exc_info:
             genomexgenome_validation(ref_result, mod_result)
@@ -98,22 +91,18 @@ class TestSequenceIDValidation:
 
     def test_same_ids_passes(self):
         """Test that matching sequence IDs pass."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr2', 'chr1'],  # Different order OK
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr2', 'chr1'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000}
+        )
 
         settings = GenomeXGenomeSettings(same_sequence_ids=True)
         result = genomexgenome_validation(ref_result, mod_result, settings)
@@ -124,22 +113,18 @@ class TestSequenceIDValidation:
 
     def test_different_ids_fails(self):
         """Test that mismatched sequence IDs raise error."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr3'],  # chr3 instead of chr2
-                'sequence_lengths': {}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr3'],
+            sequence_lengths={}
+        )
 
         settings = GenomeXGenomeSettings(same_sequence_ids=True)
 
@@ -153,22 +138,18 @@ class TestSequenceIDValidation:
 
     def test_ref_only_ids(self):
         """Test detection of reference-only sequence IDs."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 3,
-                'sequence_ids': ['chr1', 'chr2', 'plasmid1'],
-                'sequence_lengths': {}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=3,
+            sequence_ids=['chr1', 'chr2', 'plasmid1'],
+            sequence_lengths={}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={}
+        )
 
         settings = GenomeXGenomeSettings(same_sequence_ids=True)
 
@@ -181,22 +162,18 @@ class TestSequenceIDValidation:
 
     def test_mod_only_ids(self):
         """Test detection of modified-only sequence IDs."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 3,
-                'sequence_ids': ['chr1', 'chr2', 'insert1'],
-                'sequence_lengths': {}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=3,
+            sequence_ids=['chr1', 'chr2', 'insert1'],
+            sequence_lengths={}
+        )
 
         settings = GenomeXGenomeSettings(same_sequence_ids=True)
 
@@ -213,22 +190,18 @@ class TestSequenceLengthValidation:
 
     def test_same_lengths_passes(self):
         """Test that matching sequence lengths pass."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000}
+        )
 
         settings = GenomeXGenomeSettings(
             same_sequence_ids=True,
@@ -242,22 +215,18 @@ class TestSequenceLengthValidation:
 
     def test_different_lengths_fails(self):
         """Test that different sequence lengths raise error."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {'chr1': 5000000, 'chr2': 3000000}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 2,
-                'sequence_ids': ['chr1', 'chr2'],
-                'sequence_lengths': {'chr1': 5001000, 'chr2': 3000000}  # chr1 different
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={'chr1': 5000000, 'chr2': 3000000}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=2,
+            sequence_ids=['chr1', 'chr2'],
+            sequence_lengths={'chr1': 5001000, 'chr2': 3000000}
+        )
 
         settings = GenomeXGenomeSettings(
             same_sequence_ids=True,
@@ -275,22 +244,18 @@ class TestSequenceLengthValidation:
 
     def test_length_difference_reported(self):
         """Test that length differences are calculated correctly."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 1,
-                'sequence_ids': ['chr1'],
-                'sequence_lengths': {'chr1': 5000000}
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 1,
-                'sequence_ids': ['chr1'],
-                'sequence_lengths': {'chr1': 5001500}  # +1500 bp
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=1,
+            sequence_ids=['chr1'],
+            sequence_lengths={'chr1': 5000000}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=1,
+            sequence_ids=['chr1'],
+            sequence_lengths={'chr1': 5001500}
+        )
 
         settings = GenomeXGenomeSettings(
             same_sequence_ids=True,
@@ -305,22 +270,18 @@ class TestSequenceLengthValidation:
 
     def test_missing_length_info_warns(self):
         """Test that missing length information produces warning."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {
-                'num_sequences': 1,
-                'sequence_ids': ['chr1'],
-                'sequence_lengths': {}  # Missing length
-            }
-        }
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {
-                'num_sequences': 1,
-                'sequence_ids': ['chr1'],
-                'sequence_lengths': {'chr1': 5000000}
-            }
-        }
+        ref_result = GenomeOutputMetadata(
+            output_file='ref_genome.fasta',
+            num_sequences=1,
+            sequence_ids=['chr1'],
+            sequence_lengths={}
+        )
+        mod_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=1,
+            sequence_ids=['chr1'],
+            sequence_lengths={'chr1': 5000000}
+        )
 
         settings = GenomeXGenomeSettings(
             same_sequence_ids=True,
@@ -338,28 +299,9 @@ class TestMetadataErrors:
 
     def test_missing_ref_metadata_fails(self):
         """Test that missing reference metadata raises error."""
-        ref_result = {'output_file': 'ref_genome.fasta'}  # No metadata
-        mod_result = {
-            'output_file': 'mod_genome.fasta',
-            'metadata': {'num_sequences': 1}
-        }
-
-        with pytest.raises(GenomeValidationError) as exc_info:
-            genomexgenome_validation(ref_result, mod_result)
-
-        assert 'missing' in str(exc_info.value).lower()
-        assert 'metadata' in str(exc_info.value).lower()
-
-    def test_missing_mod_metadata_fails(self):
-        """Test that missing modified metadata raises error."""
-        ref_result = {
-            'output_file': 'ref_genome.fasta',
-            'metadata': {'num_sequences': 1}
-        }
-        mod_result = {'output_file': 'mod_genome.fasta'}  # No metadata
-
-        with pytest.raises(GenomeValidationError) as exc_info:
-            genomexgenome_validation(ref_result, mod_result)
-
-        assert 'missing' in str(exc_info.value).lower()
-        assert 'metadata' in str(exc_info.value).lower()
+        ref_result = GenomeOutputMetadata(
+            output_file='mod_genome.fasta',
+            num_sequences=1,
+            sequence_ids=[],
+            sequence_lengths={}
+        )

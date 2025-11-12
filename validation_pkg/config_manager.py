@@ -40,8 +40,6 @@ ALLOWED_GLOBAL_OPTIONS = {'threads', 'validation_level', 'logging_level'}
 MAX_RECOMMENDED_THREADS = 16
 
 # Default thread count when not specified in config
-# Set to 8 for optimal parallelization performance
-# Developer note: Change this value to adjust default across all validators
 DEFAULT_THREADS = 8
 
 @dataclass
@@ -111,6 +109,7 @@ class ReadConfig:
         else:
             self.basename = self.filename.rsplit('.',1)[0]
 
+
 @dataclass
 class FeatureConfig:
     """
@@ -141,6 +140,7 @@ class FeatureConfig:
             self.basename = self.filename.rsplit('.',2)[0]
         else:
             self.basename = self.filename.rsplit('.',1)[0]
+
 
 class Config:
     """
@@ -203,15 +203,6 @@ class Config:
 
         Returns:
             Logging level string ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-
-        Example:
-            >>> config = Config()
-            >>> config.options = {'logging_level': 'DEBUG'}
-            >>> config.get_logging_level()
-            'DEBUG'
-            >>> config.options = {}
-            >>> config.get_logging_level()
-            'INFO'
         """
         return self.options.get('logging_level', 'INFO')
 

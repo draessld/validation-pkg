@@ -341,7 +341,7 @@ class TestFeatureValidatorValidation:
         settings = FeatureValidator.Settings(check_coordinates=True)
         validator = FeatureValidator(feature_config, settings)
 
-        with pytest.raises(FeatureValidationError, match="Zero-length feature"):
+        with pytest.raises(FeatureValidationError, match="zero-length"):
             validator.run()
 
     def test_negative_coordinates(self, temp_dir, output_dir):
@@ -364,7 +364,7 @@ class TestFeatureValidatorValidation:
         settings = FeatureValidator.Settings(check_coordinates=True)
         validator = FeatureValidator(feature_config, settings)
 
-        with pytest.raises(FeatureValidationError, match="Negative coordinates"):
+        with pytest.raises(FeatureValidationError, match="negative coordinates"):
             validator.run()
 
 

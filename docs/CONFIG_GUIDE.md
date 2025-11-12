@@ -1,6 +1,6 @@
 # Configuration File Guide
 
-This document defines the **JSON** configuration file that `ConfigManager` uses to locate and process your bioinformatics files (genomes, reads, features).
+This document defines the **JSON** configuration file that `ConfigManager` uses to locate and process your files (genomes, reads, features).
 
 ## Table of Contents
 
@@ -23,9 +23,6 @@ This document defines the **JSON** configuration file that `ConfigManager` uses 
 - **Location:** Same directory as your input files (paths are relative to config location)
 - **Format:** JSON (UTF-8)
 - **Purpose:** Specify reference/modified genomes, reads, and optional plasmids & features
-- **Created by:** Users or analysis pipelines
-- **Processed by:** `ConfigManager.load("config.json")`
-
 ---
 
 ## Configuration Structure
@@ -53,10 +50,10 @@ This document defines the **JSON** configuration file that `ConfigManager` uses 
 
 ### Genome and Plasmid Files
 
-| Format | Extensions | Notes |
-|--------|-----------|-------|
-| FASTA | `.fa`, `.fasta`, `.fna` | Most common genome format |
-| GenBank | `.gb`, `.gbk`, `.genbank` | Includes annotations |
+| Format | Extensions | 
+|--------|-----------|
+| FASTA | `.fa`, `.fasta`, `.fna` | 
+| GenBank | `.gb`, `.gbk`, `.genbank` |
 
 ### Feature Files
 
@@ -83,8 +80,8 @@ All file types support transparent compression. The package automatically detect
 
 | Type | Extensions | Detection | Performance |
 |------|-----------|-----------|-------------|
-| **gzip** | `.gz`, `.gzip` | Automatic | Fast with `pigz` (parallel) |
-| **bzip2** | `.bz2`, `.bzip2` | Automatic | Fast with `pbzip2` (parallel) |
+| **gzip** | `.gz`, `.gzip` | Automatic | Faster with `pigz`|
+| **bzip2** | `.bz2`, `.bzip2` | Automatic | Faster with `pbzip2`|
 
 **Performance tip:** Install `pigz` and `pbzip2` for 3-4x faster compression/decompression:
 ```bash
@@ -104,6 +101,7 @@ brew install pigz pbzip2
     {"filename": "reads.fastq.bz2", "ngs_type": "illumina"}
   ]
 }
+```
 
 ---
 
@@ -168,11 +166,11 @@ All files in the directory inherit the same settings:
 
 #### NGS Type Values
 
-| Value | Description | 
-|-------|-------------|
-| `"illumina"` | Illumina short reads (SE or PE) |
-| `"ont"` | Oxford Nanopore long reads |
-| `"pacbio"` | PacBio long reads | 
+| Value |  
+|-------|
+| `"illumina"` |
+| `"ont"` | 
+| `"pacbio"` | 
 
 <!-- **Note:** BAM files are automatically detected and converted to FASTQ. Default NGS type for BAM: `pacbio`. -->
 
@@ -216,7 +214,6 @@ These settings customize validation behavior without modifying code.
 **Allowed global options:**
 - `threads`: Number of threads for parallel processing (positive integer, default: 8)
   - System automatically detects CPU cores and warns if threads exceed available cores
-  - Example: `"threads": 16` on a 4-core system triggers a warning
 - `validation_level`: `"strict"`, `"trust"`, or `"minimal"` (default: `"strict"`)
 - `logging_level`: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"` (default: `"INFO"`)
   - Controls console logging verbosity
@@ -237,15 +234,6 @@ These settings customize validation behavior without modifying code.
 ```
 
 **Result:** ALL files will use `threads=8`, `validation_level='trust'`, and `logging_level='DEBUG'` by default.
-
-**CPU Core Detection:**
-When you specify threads, the system checks available CPU cores:
-```
-INFO: Global option: threads=8 (system has 4 cores available)
-WARNING: Requested 8 threads but system only has 4 CPU cores.
-         Performance may degrade due to context switching overhead.
-         Consider using threads ≤ 4 for optimal performance.
-```
 
 **Validation:**
 - Invalid option names → `ConfigurationError` (e.g., `"abc"` not allowed)
@@ -290,74 +278,58 @@ Complete example with all optional fields and global options:
 {
   "ref_genome_filename": {
     "filename": "ref.gbk",
-    "validation_level": "strict"
+    "validation_level": "strict",
+    "threads": 8
   },
   "mod_genome_filename": {
-    "filename": "mod.fasta.gz"
+    "filename": "mod.fasta.gz",
+    "validation_level": "strict",
+    "threads": 8
   },
-  "ref_plasmid_filename": {"filename": "plasmid_ref.gbk"},
-  "mod_plasmid_filename": {"filename": "plasmid_mod.fasta"},
+  "ref_plasmid_filename": {
+    "filename": "plasmid_ref.gbk",
+    "validation_level": "strict",
+    "threads": 8
+    },
+  "mod_plasmid_filename": {
+    "filename": "plasmid_mod.fasta",
+    "validation_level": "strict",
+    "threads": 8
+    },
   "reads": [
     {
       "filename": "illumina_R1.fastq.gz",
-      "ngs_type": "illumina"
+      "ngs_type": "illumina",
+      "validation_level": "strict",
+      "threads": 8
     },
     {
       "filename": "illumina_R2.fastq.gz",
-      "ngs_type": "illumina"
+      "ngs_type": "illumina",
+      "validation_level": "strict",
+      "threads": 8
     },
     {
       "directory": "ont_reads/",
       "ngs_type": "ont",
-      "validation_level": "minimal"
+      "validation_level": "strict",
+      "threads": 8
     }
   ],
   "ref_feature_filename": {
     "filename": "features_ref.gff3",
+    "validation_level": "strict",
+    "threads": 8
   },
-  "mod_feature_filename": {"filename": "features_mod.bed"},
+  "mod_feature_filename": {
+    "filename": "features_mod.bed",
+    "validation_level": "strict",
+    "threads": 8
+    },
   "options": {
     "threads": 8,
-    "validation_level": "trust"
+    "validation_level": "strict",
+    "logging_level":"INFO"
   }
 }
 ```
-
-**Note:**
-- Global `validation_level='trust'` applies to all files
-- `ref_genome` overrides with `validation_level='strict'` (WARNING logged)
-- `ont_reads` overrides with `validation_level='minimal'` (WARNING logged)
-- All other files use global settings
-
-### Directory-Based Reads
-
-Process all files in a directory with the same settings:
-
-```json
-{
-  "ref_genome_filename": {"filename": "genome.fasta"},
-  "reads": [
-    {
-      "directory": "illumina_reads/",
-      "ngs_type": "illumina",
-      "validation_level": "trust"
-    },
-    {
-      "directory": "ont_reads/",
-      "ngs_type": "ont",
-      "validation_level": "minimal"
-    }
-  ]
-}
-```
-
----
-
-## Validation Rules
-
-The package validates your configuration before processing:
-
-1. **Required fields:** At least `ref_genome_filename`,`mod_genome_filename` AND `reads` must be present
-2. **File existence:** All specified files must exist and be accessible
-4. **Format detection:** File extensions must match supported formats
-5. **NGS type:** Read files must specify a valid `ngs_type`

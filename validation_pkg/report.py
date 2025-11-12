@@ -48,31 +48,6 @@ class ValidationReport:
     Collects results from validators and inter-file validation,
     tracks input settings and output metadata, then generates a
     detailed report when flush() is called.
-
-    Features:
-    - Input settings tracking (what parameters were used)
-    - Output metadata tracking (what was produced)
-    - Inter-file validation results
-    - Validation issues (errors/warnings per file)
-    - Timing information
-    - Text and JSON export formats
-
-    Usage:
-        report = ValidationReport(Path("report.txt"))
-
-        # Add validator results
-        genome_res = validate_genome(config.ref_genome, settings)
-        report.write(genome_res, file_type="genome",
-                    input_file=config.ref_genome.filename,
-                    settings=settings)
-
-        # Add inter-file validation results
-        interfile_res = genomexgenome_validation(ref_res, mod_res, settings)
-        report.write(interfile_res, file_type="genomexgenome")
-
-        # Generate final report
-        report.flush()  # Writes text report
-        report.flush(format="json")  # Writes JSON report
     """
 
     def __init__(self, report_path: Path):

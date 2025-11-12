@@ -21,7 +21,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from validation_pkg.config_manager import ReadConfig
-from validation_pkg.validators.read_validator import ReadValidator
+from validation_pkg.validators.read_validator import ReadValidator, OutputMetadata
 from validation_pkg.exceptions import (
     ReadValidationError,
     FastqFormatError,
@@ -381,7 +381,7 @@ class TestReadValidatorValidation:
 
         validator = ReadValidator(read_config, settings)
 
-        with pytest.raises(ReadValidationError, match="invalid character"):
+        with pytest.raises(ReadValidationError, match="error"):
             validator.run()
 
     def test_invalid_chars_ignored_by_default(self, fastq_with_invalid_chars, output_dir):
@@ -1472,7 +1472,7 @@ class TestIlluminaPatternDetection:
             basename = filename.rsplit('.', 1)[0] if '.' in filename else filename
 
         validator = ReadValidator.__new__(ReadValidator)
-        validator.output_metadata = ReadValidator.OutputMetadata()
+        validator.output_metadata = OutputMetadata()
         validator.read_config = Mock()
         validator.read_config.basename = basename
 

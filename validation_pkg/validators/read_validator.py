@@ -126,6 +126,49 @@ def _validate_single_read(record, check_invalid_chars: bool, allow_empty_id: boo
 
     return {'success': True, 'record_id': record.id}
 
+
+@dataclass
+class OutputMetadata:
+    """
+    Metadata returned from read validation.
+
+    Fields are populated based on validation_level:
+    - minimal: Only output_file, output_filename, validation_level
+    - trust: + num_reads, Illumina pattern info
+    - strict: All fields (includes n50, total_bases, mean_read_length)
+
+    Attributes:
+        output_file: Full path to main output file
+        output_filename: Name of output file
+        base_name: Illumina paired-end base name (pattern detection)
+        read_number: Illumina read number (1 or 2) from pattern detection
+        ngs_type_detected: NGS platform type from read header
+        num_reads: Total number of reads in output
+        validation_level: Validation level used ('strict'/'trust'/'minimal')
+
+        # Strict mode only statistics:
+        n50: N50 read length metric in bp (strict only)
+        total_bases: Sum of all read lengths in bp (strict only)
+        mean_read_length: Average read length in bp (strict only)
+        longest_read_length: Length of longest read in bp (strict only)
+        shortest_read_length: Length of shortest read in bp (strict only)
+    """
+    output_file: str = None
+    output_filename: str = None
+    base_name: str = None
+    read_number: int = None
+    ngs_type_detected: str = None
+    num_reads: int = None
+    validation_level: str = None
+
+    # Strict mode statistics
+    n50: int = None
+    total_bases: int = None
+    mean_read_length: float = None
+    longest_read_length: int = None
+    shortest_read_length: int = None
+
+
 class ReadValidator:
     """
     Validates and processes sequencing read files in FASTQ and BAM formats.
@@ -153,12 +196,6 @@ class ReadValidator:
         settings: Settings object controlling validation and processing behavior
         sequences: List of parsed SeqRecord objects (populated during validation)
 
-    Example:
-        >>> from validation_pkg import ConfigManager, ReadValidator
-        >>> config = ConfigManager.load("config.json")
-        >>> settings = ReadValidator.Settings(validation_level='trust', outdir_by_ngs_type=True)
-        >>> validator = ReadValidator(config.reads[0], config.output_dir, settings)
-        >>> validator.validate()
     """
 
     @dataclass
@@ -196,47 +233,6 @@ class ReadValidator:
         output_subdir_name: Optional[str] = None
         outdir_by_ngs_type: bool = False
 
-    @dataclass
-    class OutputMetadata:
-        """
-        Metadata returned from read validation.
-
-        Fields are populated based on validation_level:
-        - minimal: Only output_file, output_filename, validation_level
-        - trust: + num_reads, Illumina pattern info
-        - strict: All fields (includes n50, total_bases, mean_read_length)
-
-        Attributes:
-            output_file: Full path to main output file
-            output_filename: Name of output file
-            base_name: Illumina paired-end base name (pattern detection)
-            read_number: Illumina read number (1 or 2) from pattern detection
-            ngs_type_detected: NGS platform type from read header
-            num_reads: Total number of reads in output
-            validation_level: Validation level used ('strict'/'trust'/'minimal')
-
-            # Strict mode only statistics:
-            n50: N50 read length metric in bp (strict only)
-            total_bases: Sum of all read lengths in bp (strict only)
-            mean_read_length: Average read length in bp (strict only)
-            longest_read_length: Length of longest read in bp (strict only)
-            shortest_read_length: Length of shortest read in bp (strict only)
-        """
-        output_file: str = None
-        output_filename: str = None
-        base_name: str = None
-        read_number: int = None
-        ngs_type_detected: str = None
-        num_reads: int = None
-        validation_level: str = None
-
-        # Strict mode statistics
-        n50: int = None
-        total_bases: int = None
-        mean_read_length: float = None
-        longest_read_length: int = None
-        shortest_read_length: int = None
-
     def __init__(self, read_config, settings: Optional[Settings] = None) -> None:
         """
         Initialize read validator.
@@ -258,7 +254,7 @@ class ReadValidator:
 
         # From settings
         self.settings = settings if settings is not None else self.Settings() 
-        self.output_metadata = self.OutputMetadata()
+        self.output_metadata = OutputMetadata()
 
         # Parsed data
         self.sequences = []  # List of SeqRecord objects

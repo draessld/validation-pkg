@@ -4,7 +4,6 @@ Logging configuration for the bioinformatics validation package.
 Provides structured logging with multiple outputs:
 - Console output (colored, user-friendly)
 - File output (detailed, for debugging)
-- Validation report (summary of all issues found)
 """
 
 import sys
@@ -88,20 +87,6 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
 
     return event_dict
 
-class ValidationReport:
-    """
-    TODO
-    """
-    def __init__(self,output_path):
-        self.output_path = output_path
-        self.handle = open(output_path)
-
-    def write(self):
-        pass
-
-    def flush(self):
-        self.handle.flush()
-        self.handle.close()
 
 class ValidationLogger:
     """
@@ -110,7 +95,6 @@ class ValidationLogger:
     Features:
     - Console output (colored, user-friendly)
     - File output (detailed debug log)
-    - Validation report (summary of issues)
     """
 
     _instance = None
@@ -136,9 +120,6 @@ class ValidationLogger:
         # Will hold the structlog logger instance
         self.logger = None
 
-        # Store report file path
-        self.report_file = None
-
         # Storage for timing measurements
         self._timers: Dict[str, float] = {}
         self._timers_lock = Lock()
@@ -153,7 +134,6 @@ class ValidationLogger:
         self,
         console_level: str = "INFO",
         log_file: Optional[Path] = None,
-        report_file: Optional[Path] = None,
         clear_previous_issues: bool = True
     ):
         """
@@ -162,7 +142,6 @@ class ValidationLogger:
         Args:
             console_level: Level for console output (DEBUG, INFO, WARNING, ERROR)
             log_file: Path to detailed log file (optional)
-            report_file: Path to validation report file (optional)
             clear_previous_issues: Clear validation issues from previous runs (default: True)
 
         Note:
@@ -173,12 +152,6 @@ class ValidationLogger:
         if clear_previous_issues:
             self.clear_issues()
             self.clear_file_timings()
-
-        # Store report file path
-        self.report_file = report_file
-        if report_file:
-            self.report_file = Path(report_file)
-            self.report_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Setup stdlib logging first (if file logging is requested)
         if log_file:
@@ -272,8 +245,6 @@ class ValidationLogger:
         if log_file:
             self.info(f"Detailed log file: {log_file}")
 
-        if report_file:
-            self.info(f"Validation report will be saved to: {report_file}")
 
     def reconfigure_level(
         self,
@@ -490,128 +461,6 @@ class ValidationLogger:
         with self._timings_lock:
             self.file_timings.clear()
 
-    def generate_report(self):
-        """
-        Generate validation report and save to file (thread-safe).
-
-        Returns:
-            str: Report content
-        """
-        if not self.report_file:
-            return None
-
-        # Copy issues list, timers, and file timings to avoid holding lock during file I/O
-        with self._issues_lock:
-            issues_copy = self.validation_issues.copy()
-
-        with self._timers_lock:
-            timers_copy = self._timers.copy()
-
-        with self._timings_lock:
-            file_timings_copy = self.file_timings.copy()
-
-        # Count issues by level
-        errors = sum(1 for issue in issues_copy
-                    if isinstance(issue, dict) and issue.get('level') == 'ERROR')
-        warnings = sum(1 for issue in issues_copy
-                      if isinstance(issue, dict) and issue.get('level') == 'WARNING')
-
-        # Generate report
-        report_lines = [
-            "=" * 80,
-            "BIOINFORMATICS VALIDATION REPORT",
-            "=" * 80,
-            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "",
-            "SUMMARY",
-            "-" * 80,
-            f"Total Issues: {len(issues_copy)}",
-            f"  Errors:   {errors}",
-            f"  Warnings: {warnings}",
-            "",
-        ]
-
-        # Add timing section if any timers were recorded
-        if timers_copy:
-            report_lines.extend([
-                "PERFORMANCE",
-                "-" * 80,
-            ])
-            for timer_name, elapsed_time in sorted(timers_copy.items()):
-                report_lines.append(f"  {timer_name}: {elapsed_time:.2f}s")
-            report_lines.append("")
-
-        # Add per-file timing section if any files were processed
-        if file_timings_copy:
-            report_lines.extend([
-                "FILES PROCESSED",
-                "-" * 80,
-            ])
-            for timing in file_timings_copy:
-                report_lines.append(
-                    f"  {timing.input_file:50s} | "
-                    f"{timing.validator_type.upper():8s} | "
-                    f"{timing.elapsed_time:6.2f}s"
-                )
-            report_lines.append("")
-
-        report_lines.extend([
-            "DETAILS",
-            "-" * 80,
-        ])
-
-        if not issues_copy:
-            report_lines.append("✓ No issues found - all validations passed!")
-        else:
-            for idx, issue in enumerate(issues_copy, 1):
-                if isinstance(issue, dict):
-                    report_lines.append(f"\n{idx}. [{issue['level']}] {issue['category']}")
-                    report_lines.append(f"   {issue['message']}")
-                    if issue.get('details'):
-                        for key, value in issue['details'].items():
-                            report_lines.append(f"   - {key}: {value}")
-                else:
-                    # Old format (tuple)
-                    level, message = issue
-                    report_lines.append(f"\n{idx}. [{level}] {message}")
-
-        report_lines.append("\n" + "=" * 80)
-
-        # Ensure report ends with newline
-        report_content = "\n".join(report_lines) + "\n"
-
-        # Auto-increment report file if exists
-        from validation_pkg.utils.file_handler import get_incremented_path
-        actual_report_file = get_incremented_path(self.report_file)
-
-        # Write to incremented file
-        actual_report_file.write_text(report_content, encoding='utf-8')
-        self.info(f"Validation report saved to: {actual_report_file}")
-
-        return report_content
-
-    def get_summary(self) -> dict:
-        """
-        Get summary of validation results (thread-safe).
-
-        Returns:
-            dict: Summary statistics
-        """
-        with self._issues_lock:
-            issues_copy = self.validation_issues.copy()
-
-        errors = sum(1 for issue in issues_copy
-                    if isinstance(issue, dict) and issue.get('level') == 'ERROR')
-        warnings = sum(1 for issue in issues_copy
-                      if isinstance(issue, dict) and issue.get('level') == 'WARNING')
-
-        return {
-            'total_issues': len(issues_copy),
-            'errors': errors,
-            'warnings': warnings,
-            'passed': errors == 0
-        }
-
     def clear_issues(self):
         """
         Clear all validation issues (thread-safe).
@@ -619,7 +468,6 @@ class ValidationLogger:
         This is useful for:
         - Starting a new validation run with clean state
         - Test isolation (preventing contamination between tests)
-        - Resetting after generating a report
 
         Example:
             >>> logger = get_logger()
@@ -634,12 +482,6 @@ class ValidationLogger:
         Context manager entry - clear issues at start.
 
         This enables using the logger with 'with' statement for automatic isolation:
-
-        Example:
-            >>> with get_logger() as logger:
-            ...     logger.info("Starting validation")
-            ...     # validation_issues starts empty
-            ...     # and will be available throughout this block
         """
         self.clear_issues()
         return self
@@ -670,7 +512,6 @@ def get_logger() -> ValidationLogger:
 def setup_logging(
     console_level: str = "INFO",
     log_file: Optional[Path] = None,
-    report_file: Optional[Path] = None
 ):
     """
     Set up logging for the package.
@@ -678,18 +519,11 @@ def setup_logging(
     Args:
         console_level: Console output level (DEBUG, INFO, WARNING, ERROR)
         log_file: Path to detailed log file
-        report_file: Path to validation report
     """
     logger = get_logger()
-    logger.setup(console_level, log_file, report_file)
+    logger.setup(console_level, log_file)
     return logger
 
 
-# ============================================================================
-# ValidationReport - Import from separate module
-# ============================================================================
-
-from validation_pkg.report import ValidationReport
-
 # Export for backwards compatibility
-__all__ = ['ValidationLogger', 'get_logger', 'setup_logging', 'ValidationReport']
+__all__ = ['ValidationLogger', 'get_logger', 'setup_logging']
