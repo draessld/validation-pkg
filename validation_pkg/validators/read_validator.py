@@ -128,7 +128,7 @@ def _validate_single_read(record, check_invalid_chars: bool, allow_empty_id: boo
 
 
 @dataclass
-class OutputMetadata:
+class OutputMetadata(BaseSettings):
     """
     Metadata returned from read validation.
 
@@ -138,6 +138,7 @@ class OutputMetadata:
     - strict: All fields (includes n50, total_bases, mean_read_length)
 
     Attributes:
+        input_file: Full path to input file
         output_file: Full path to main output file
         output_filename: Name of output file
         base_name: Illumina paired-end base name (pattern detection)
@@ -145,6 +146,7 @@ class OutputMetadata:
         ngs_type_detected: NGS platform type from read header
         num_reads: Total number of reads in output
         validation_level: Validation level used ('strict'/'trust'/'minimal')
+        elapsed_time: Time taken for validation in seconds
 
         # Strict mode only statistics:
         n50: N50 read length metric in bp (strict only)
@@ -153,6 +155,7 @@ class OutputMetadata:
         longest_read_length: Length of longest read in bp (strict only)
         shortest_read_length: Length of shortest read in bp (strict only)
     """
+    input_file: str = None
     output_file: str = None
     output_filename: str = None
     base_name: str = None
@@ -160,6 +163,7 @@ class OutputMetadata:
     ngs_type_detected: str = None
     num_reads: int = None
     validation_level: str = None
+    elapsed_time: float = None
 
     # Strict mode statistics
     n50: int = None
@@ -167,6 +171,31 @@ class OutputMetadata:
     mean_read_length: float = None
     longest_read_length: int = None
     shortest_read_length: int = None
+
+    def __str__(self):
+        parts = [f"Validation Level: {self.validation_level or 'N/A'}"]
+        parts.append(f"Output File: {self.output_file or 'N/A'}")
+        parts.append(f"Output Filename: {self.output_filename or 'N/A'}")
+
+        # Add Illumina pattern info if available
+        if self.base_name or self.read_number or self.ngs_type_detected or self.num_reads is not None:
+            parts.append("\n--- Pattern & Read Info ---")
+            parts.append(f"Base Name: {self.base_name or 'N/A'}")
+            parts.append(f"Read Number: {self.read_number if self.read_number is not None else 'N/A'}")
+            parts.append(f"NGS Type Detected: {self.ngs_type_detected or 'N/A'}")
+            parts.append(f"Number of Reads: {self.num_reads if self.num_reads is not None else 'N/A'}")
+
+        # Add strict statistics if present
+        if any(v is not None for v in [self.n50, self.total_bases, self.mean_read_length,
+                                       self.longest_read_length, self.shortest_read_length]):
+            parts.append("\n--- Strict Statistics ---")
+            parts.append(f"N50: {self.n50 if self.n50 is not None else 'N/A'} bp")
+            parts.append(f"Total Bases: {self.total_bases if self.total_bases is not None else 'N/A'} bp")
+            parts.append(f"Mean Read Length: {self.mean_read_length if self.mean_read_length is not None else 'N/A'} bp")
+            parts.append(f"Longest Read Length: {self.longest_read_length if self.longest_read_length is not None else 'N/A'} bp")
+            parts.append(f"Shortest Read Length: {self.shortest_read_length if self.shortest_read_length is not None else 'N/A'} bp")
+
+        return "\n".join(parts)
 
 
 class ReadValidator:
@@ -310,6 +339,31 @@ class ReadValidator:
             'shortest_read_length': min(lengths) if lengths else 0
         }
 
+    def _fill_output_metadata(self, output_path: Path) -> None:
+        """
+        Create OutputMetadata object based on validation level.
+
+        Args:
+            output_path: Path to the main output file
+
+        """
+        # Populate and return OutputMetadata
+        self.output_metadata.input_file = self.read_config.filename
+        self.output_metadata.output_file = str(output_path) if output_path else None
+        self.output_metadata.output_filename = output_path.name if output_path else None
+        self.output_metadata.num_reads = len(self.sequences)
+        self.output_metadata.validation_level = self.validation_level
+
+        # Calculate read statistics in strict mode only
+        if self.validation_level == 'strict' and self.sequences:
+            stats = self._calculate_read_statistics()
+            self.output_metadata.n50 = stats['n50']
+            self.output_metadata.total_bases = stats['total_bases']
+            self.output_metadata.mean_read_length = stats['mean_read_length']
+            self.output_metadata.longest_read_length = stats['longest_read_length']
+            self.output_metadata.shortest_read_length = stats['shortest_read_length']
+
+
     def run(self) -> OutputMetadata:
         """
         Main validation and processing workflow.
@@ -386,21 +440,9 @@ class ReadValidator:
                 elapsed
             )
 
-            # Populate and return OutputMetadata
-            self.output_metadata.output_file = str(output_path)
-            self.output_metadata.output_filename = output_path.name
-            self.output_metadata.num_reads = len(self.sequences)
-            self.output_metadata.validation_level = self.validation_level
-
-            # Calculate read statistics in strict mode only
-            if self.validation_level == 'strict' and self.sequences:
-                stats = self._calculate_read_statistics()
-                self.output_metadata.n50 = stats['n50']
-                self.output_metadata.total_bases = stats['total_bases']
-                self.output_metadata.mean_read_length = stats['mean_read_length']
-                self.output_metadata.longest_read_length = stats['longest_read_length']
-                self.output_metadata.shortest_read_length = stats['shortest_read_length']
-
+            # Create and return OutputMetadata
+            self._fill_output_metadata(output_path)
+            self.output_metadata.elapsed_time = elapsed
             return self.output_metadata
 
         except Exception as e:

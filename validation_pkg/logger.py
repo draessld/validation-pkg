@@ -69,6 +69,7 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
     """
     worker_id = event_dict.get("worker_id")
     file_context = event_dict.get("file_context")
+    category = event_dict.get("category")
 
     # Build the context prefix
     context_parts = []
@@ -81,6 +82,16 @@ def format_process_info(logger, method_name, event_dict: dict) -> dict:
         if len(file_context) > 40:
             file_context = "..." + file_context[-37:]
         context_parts.append(f"{Colors.MAGENTA}{file_context}{Colors.RESET}")
+
+    # Add category badge if present (e.g., [genome], [read], [feature])
+    if category and category not in ['validation_pipeline']:
+        category_color = {
+            'genome': Colors.GREEN,
+            'read': Colors.BLUE,
+            'feature': Colors.YELLOW,
+            'inter-file': Colors.CYAN
+        }.get(category, Colors.GRAY)
+        context_parts.append(f"{category_color}{category}{Colors.RESET}")
 
     if context_parts:
         event_dict["context"] = f"[{' '.join(context_parts)}]"
@@ -460,6 +471,59 @@ class ValidationLogger:
         """Clear all file timing information (thread-safe)."""
         with self._timings_lock:
             self.file_timings.clear()
+
+    def display_file_timings_summary(self):
+        """
+        Display a nice summary of file processing times.
+
+        Creates a formatted table showing:
+        - File name
+        - Validator type
+        - Processing time
+        - Total time
+        """
+        if not self.file_timings:
+            return
+
+        with self._timings_lock:
+            timings_copy = self.file_timings.copy()
+
+        # Calculate total time
+        total_time = sum(t.elapsed_time for t in timings_copy)
+
+        # Print header
+        self.info("")
+        self.info("=" * 80)
+        self.info("FILE PROCESSING SUMMARY")
+        self.info("=" * 80)
+
+        # Find longest filename for formatting
+        max_filename_len = max(len(t.input_file) for t in timings_copy) if timings_copy else 20
+        max_filename_len = min(max_filename_len, 50)  # Cap at 50 chars
+
+        # Print each file
+        for timing in timings_copy:
+            # Truncate long filenames
+            filename = timing.input_file
+            if len(filename) > max_filename_len:
+                filename = "..." + filename[-(max_filename_len-3):]
+
+            # Format time
+            time_str = f"{timing.elapsed_time:.2f}s"
+
+            # Format validator type with color
+            type_label = timing.validator_type.upper()
+
+            self.info(
+                f"  {filename:<{max_filename_len}}  [{type_label:>7}]  {time_str:>8}",
+                category=timing.validator_type
+            )
+
+        # Print total
+        self.info("-" * 80)
+        self.info(f"  {'TOTAL':<{max_filename_len}}             {total_time:>8.2f}s")
+        self.info("=" * 80)
+        self.info("")
 
     def clear_issues(self):
         """

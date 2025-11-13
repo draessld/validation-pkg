@@ -46,21 +46,44 @@ class OutputMetadata:
     Metadata returned from feature validation.
 
     Attributes:
+        input_file: Full path to input file
         output_file: Full path to main output file
         output_filename: Name of output file
         num_features: Total number of features in output
         feature_types: List of unique feature types (gene, CDS, exon, etc.)
         sequence_ids: List of sequence IDs referenced by features (for inter-file validation)
         validation_level: Validation level used ('strict'/'trust'/'minimal')
+        elapsed_time: Time taken for validation in seconds
     """
+    input_file: str = None
     output_file: str = None
     output_filename: str = None
     num_features: int = None
     feature_types: List[str] = None
     sequence_ids: List[str] = None
     validation_level: str = None
+    elapsed_time: float = None
 
+    def __str__(self):
+        parts = [f"Validation Level: {self.validation_level or 'N/A'}"]
+        parts.append(f"Output File: {self.output_file or 'N/A'}")
+        parts.append(f"Output Filename: {self.output_filename or 'N/A'}")
 
+        if self.num_features is not None:
+            parts.append(f"Number of Features: {self.num_features}")
+
+        if self.feature_types:
+            parts.append(f"Feature Types: {', '.join(self.feature_types)}")
+
+        if self.sequence_ids:
+            parts.append(f"Sequence IDs: {len(self.sequence_ids)} sequences referenced")
+
+        if self.elapsed_time is not None:
+            parts.append(f"Elapsed Time: {self.elapsed_time:.2f} seconds")
+
+        return "\n".join(parts)
+    
+    
 @dataclass
 class Feature:
     """
@@ -192,6 +215,7 @@ class FeatureValidator:
 
         # From settings
         self.settings = settings if settings is not None else self.Settings() 
+        self.output_metadata = OutputMetadata()
 
         # Parsed data
         self.features: List[Feature] = []
@@ -202,6 +226,22 @@ class FeatureValidator:
         if not self.threads:
             from validation_pkg.config_manager import DEFAULT_THREADS
             self.threads = DEFAULT_THREADS    #   default global value
+
+    def _fill_output_metadata(self, output_path: Path) -> None:
+        """
+        Create OutputMetadata object based on validation level.
+
+        Args:
+            output_path: Path to the main output file
+
+        """
+        self.output_metadata.input_file = self.feature_config.filename
+        self.output_metadata.output_file = str(output_path) if output_path else None
+        self.output_metadata.output_filename = output_path.name if output_path else None
+        self.output_metadata.num_features = len(self.features)
+        self.output_metadata.feature_types = list(set(f.feature_type for f in self.features))
+        self.output_metadata.sequence_ids = list(set(f.seqname for f in self.features))
+        self.output_metadata.validation_level = self.validation_level
 
     def run(self) -> OutputMetadata:
         """
@@ -247,14 +287,9 @@ class FeatureValidator:
             )
 
             # Create and return OutputMetadata
-            return OutputMetadata(
-                output_file=str(output_path),
-                output_filename=output_path.name,
-                num_features=len(self.features),
-                feature_types=list(set(f.feature_type for f in self.features)),
-                sequence_ids=list(set(f.seqname for f in self.features)),
-                validation_level=self.validation_level
-            )
+            self._fill_output_metadata(output_path)
+            self.output_metadata.elapsed_time = elapsed
+            return self.output_metadata
 
         except Exception as e:
             self.logger.error(f"Feature validation failed: {e}")

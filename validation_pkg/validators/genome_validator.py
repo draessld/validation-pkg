@@ -40,7 +40,7 @@ from validation_pkg.utils.file_handler import open_compressed_writer
 
 
 @dataclass
-class OutputMetadata:
+class OutputMetadata(BaseSettings):
     """
     Metadata returned from genome validation.
 
@@ -50,6 +50,7 @@ class OutputMetadata:
     - strict: All fields (includes total_genome_size, gc_content, n50)
 
     Attributes:
+        input_file: Full path to input file
         output_file: Full path to main output file
         output_filename: Name of main output file
         num_sequences: Total number of sequences in output
@@ -62,11 +63,13 @@ class OutputMetadata:
         plasmid_filenames: List of plasmid output filenames (if plasmid_split=True)
         num_sequences_filtered: Number of sequences removed by min_sequence_length filter
         validation_level: Validation level used ('strict'/'trust'/'minimal')
+        elapsed_time: Time taken for validation in seconds
 
         # Inter-file validation fields (trust/strict only)
         sequence_ids: List of sequence IDs for inter-file validation
         sequence_lengths: Dict mapping sequence IDs to lengths
     """
+    input_file: str = None
     output_file: str = None
     output_filename: str = None
     num_sequences: int = None
@@ -79,11 +82,11 @@ class OutputMetadata:
     plasmid_filenames: List[str] = None
     num_sequences_filtered: int = None
     validation_level: str = None
+    elapsed_time: float = None
 
     # Inter-file validation fields
     sequence_ids: List[str] = None
     sequence_lengths: dict = None
-
 
 class GenomeValidator:
     """
@@ -193,6 +196,7 @@ class GenomeValidator:
 
         # From settings
         self.settings = settings if settings is not None else self.Settings() 
+        self.output_metadata = OutputMetadata()
 
         # Parsed data
         self.sequences = []  # List of SeqRecord objects
@@ -266,61 +270,57 @@ class GenomeValidator:
 
         return 0
 
-    def _create_output_metadata(self, output_path: Path) -> OutputMetadata:
+    def _fill_output_metadata(self, output_path: Path) -> None:
         """
         Create OutputMetadata object based on validation level.
 
         Args:
             output_path: Path to the main output file
 
-        Returns:
-            OutputMetadata object with fields populated based on validation_level
         """
-        metadata = OutputMetadata()
-        metadata.validation_level = self.validation_level
-        metadata.output_file = str(output_path) if output_path else None
-        metadata.output_filename = output_path.name if output_path else None
+        self.output_metadata.input_file = self.genome_config.filename
+        self.output_metadata.validation_level = self.validation_level
+        self.output_metadata.output_file = str(output_path) if output_path else None
+        self.output_metadata.output_filename = output_path.name if output_path else None
 
         # Minimal mode - only basic info available
         if self.validation_level == 'minimal':
-            return metadata
+            return self.output_metadata
 
         # Trust and Strict modes - sequences were parsed
         if self.sequences:
-            metadata.num_sequences = len(self.sequences)
+            self.output_metadata.num_sequences = len(self.sequences)
 
             # Find longest sequence
             if self.sequences:
                 longest_seq = max(self.sequences, key=lambda x: len(x.seq))
-                metadata.longest_sequence_length = len(longest_seq.seq)
-                metadata.longest_sequence_id = str(longest_seq.id)
+                self.output_metadata.longest_sequence_length = len(longest_seq.seq)
+                self.output_metadata.longest_sequence_id = str(longest_seq.id)
 
             # Inter-file validation fields (trust and strict modes)
-            metadata.sequence_ids = [str(seq.id) for seq in self.sequences]
-            metadata.sequence_lengths = {str(seq.id): len(seq.seq) for seq in self.sequences}
+            self.output_metadata.sequence_ids = [str(seq.id) for seq in self.sequences]
+            self.output_metadata.sequence_lengths = {str(seq.id): len(seq.seq) for seq in self.sequences}
 
         # Plasmid information (available in both trust and strict)
         if self.plasmid_filenames:
-            metadata.plasmid_count = len(self.plasmid_filenames)
-            metadata.plasmid_filenames = self.plasmid_filenames
+            self.output_metadata.plasmid_count = len(self.plasmid_filenames)
+            self.output_metadata.plasmid_filenames = self.plasmid_filenames
         elif self.num_sequences_filtered > 0:
             # No plasmids split, but sequences were filtered
             pass
 
-        metadata.num_sequences_filtered = self.num_sequences_filtered
+        self.output_metadata.num_sequences_filtered = self.num_sequences_filtered
 
         # Strict mode only - compute expensive statistics
         if self.validation_level == 'strict' and self.sequences:
             # Total genome size
-            metadata.total_genome_size = sum(len(seq.seq) for seq in self.sequences)
+            self.output_metadata.total_genome_size = sum(len(seq.seq) for seq in self.sequences)
 
             # GC content
-            metadata.gc_content = self._calculate_gc_content(self.sequences)
+            self.output_metadata.gc_content = self._calculate_gc_content(self.sequences)
 
             # N50
-            metadata.n50 = self._calculate_n50(self.sequences)
-
-        return metadata
+            self.output_metadata.n50 = self._calculate_n50(self.sequences)
 
     def run(self) -> OutputMetadata:
         """
@@ -366,7 +366,9 @@ class GenomeValidator:
             )
 
             # Create and return OutputMetadata
-            return self._create_output_metadata(output_path)
+            self._fill_output_metadata(output_path)
+            self.output_metadata.elapsed_time = elapsed
+            return self.output_metadata
 
         except Exception as e:
             self.logger.error(f"Genome validation failed: {e}")

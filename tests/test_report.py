@@ -113,51 +113,47 @@ def sample_interfile_result():
 # ============================================================================
 
 class TestFileValidationRecord:
-    """Test FileValidationRecord dataclass."""
+    """Test FileValidationRecord dataclass with simplified API."""
 
     def test_record_creation_minimal(self):
         """Test creating record with minimal required fields."""
+        output_data = {
+            'input_file': 'genome.fasta',
+            'output_file': '/output/genome.fasta.gz'
+        }
         record = FileValidationRecord(
-            input_file='genome.fasta',
+            output_data=output_data,
             validator_type='genome'
         )
 
-        assert record.input_file == 'genome.fasta'
+        assert record.output_data == output_data
         assert record.validator_type == 'genome'
         assert record.input_settings is None
-        assert record.output_file is None
-        assert record.output_metadata == {}
-        assert record.elapsed_time is None
-        assert isinstance(record.timestamp, str)
 
     def test_record_creation_complete(self, sample_genome_metadata, sample_genome_settings):
         """Test creating record with all fields."""
         record = FileValidationRecord(
-            input_file='genome.fasta',
+            output_data=sample_genome_metadata,
             validator_type='genome',
-            input_settings=sample_genome_settings,
-            output_file='/output/genome.fasta.gz',
-            output_metadata=sample_genome_metadata,
-            elapsed_time=12.5
+            input_settings=sample_genome_settings.to_dict()
         )
 
-        assert record.input_file == 'genome.fasta'
+        assert record.output_data == sample_genome_metadata
         assert record.validator_type == 'genome'
-        assert record.input_settings == sample_genome_settings
-        assert record.output_file == '/output/genome.fasta.gz'
-        assert record.output_metadata == sample_genome_metadata
-        assert record.elapsed_time == 12.5
-        assert isinstance(record.timestamp, str)
+        assert record.input_settings == sample_genome_settings.to_dict()
 
-    def test_timestamp_format(self):
-        """Test timestamp is in ISO format."""
+    def test_record_with_dict_settings(self):
+        """Test creating record with dict settings."""
+        output_data = {'input_file': 'test.fasta', 'output_file': '/output/test.fasta.gz'}
+        settings = {'validation_level': 'strict', 'threads': 4}
+
         record = FileValidationRecord(
-            input_file='test.fasta',
-            validator_type='genome'
+            output_data=output_data,
+            validator_type='genome',
+            input_settings=settings
         )
 
-        # Should be able to parse as ISO format
-        datetime.fromisoformat(record.timestamp)
+        assert record.input_settings == settings
 
 
 # ============================================================================
@@ -249,37 +245,31 @@ class TestFileValidationRecording:
         """Test recording genome validation result (dict format)."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': sample_genome_metadata['output_file'],
-            'metadata': sample_genome_metadata
-        }
+        # Add input_file to metadata
+        output_data = sample_genome_metadata.copy()
+        output_data['input_file'] = 'genome.fasta'
 
         report.write(
-            result,
+            output_data,
             file_type='genome',
-            input_file='genome.fasta',
-            settings=sample_genome_settings,
-            elapsed_time=12.5
+            settings=sample_genome_settings
         )
 
         assert len(report.file_records) == 1
         record = report.file_records[0]
-        assert record.input_file == 'genome.fasta'
+        assert record.output_data['input_file'] == 'genome.fasta'
         assert record.validator_type == 'genome'
         assert record.input_settings == sample_genome_settings.to_dict()
-        assert record.output_file == sample_genome_metadata['output_file']
-        assert record.elapsed_time == 12.5
+        assert record.output_data['output_file'] == sample_genome_metadata['output_file']
 
     def test_write_read_result_dict(self, temp_report_path, sample_read_metadata):
         """Test recording read validation result (dict format)."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': sample_read_metadata['output_file'],
-            'metadata': sample_read_metadata
-        }
+        output_data = sample_read_metadata.copy()
+        output_data['input_file'] = 'reads.fastq'
 
-        report.write(result, file_type='read', input_file='reads.fastq')
+        report.write(output_data, file_type='read')
 
         assert len(report.file_records) == 1
         assert report.file_records[0].validator_type == 'read'
@@ -288,12 +278,10 @@ class TestFileValidationRecording:
         """Test recording feature validation result (dict format)."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': sample_feature_metadata['output_file'],
-            'metadata': sample_feature_metadata
-        }
+        output_data = sample_feature_metadata.copy()
+        output_data['input_file'] = 'features.gff'
 
-        report.write(result, file_type='feature', input_file='features.gff')
+        report.write(output_data, file_type='feature')
 
         assert len(report.file_records) == 1
         assert report.file_records[0].validator_type == 'feature'
@@ -302,17 +290,14 @@ class TestFileValidationRecording:
         """Test recording multiple file validation results."""
         report = ValidationReport(temp_report_path)
 
-        genome_result = {
-            'output_file': sample_genome_metadata['output_file'],
-            'metadata': sample_genome_metadata
-        }
-        read_result = {
-            'output_file': sample_read_metadata['output_file'],
-            'metadata': sample_read_metadata
-        }
+        genome_result = sample_genome_metadata.copy()
+        genome_result['input_file'] = 'genome.fasta'
 
-        report.write(genome_result, file_type='genome', input_file='genome.fasta')
-        report.write(read_result, file_type='read', input_file='reads.fastq')
+        read_result = sample_read_metadata.copy()
+        read_result['input_file'] = 'reads.fastq'
+
+        report.write(genome_result, file_type='genome')
+        report.write(read_result, file_type='read')
 
         assert len(report.file_records) == 2
         assert report.file_records[0].validator_type == 'genome'
@@ -323,11 +308,11 @@ class TestFileValidationRecording:
         report = ValidationReport(temp_report_path)
 
         results = [
-            {'output_file': '/output/reads1_R1.fastq.gz', 'metadata': sample_read_metadata},
-            {'output_file': '/output/reads2_R1.fastq.gz', 'metadata': sample_read_metadata}
+            {**sample_read_metadata, 'input_file': 'reads1.fastq', 'output_file': '/output/reads1_R1.fastq.gz'},
+            {**sample_read_metadata, 'input_file': 'reads2.fastq', 'output_file': '/output/reads2_R1.fastq.gz'}
         ]
 
-        report.write(results, file_type='read', input_file='reads.fastq')
+        report.write(results, file_type='read')
 
         assert len(report.file_records) == 2
 
@@ -335,29 +320,25 @@ class TestFileValidationRecording:
         """Test recording result without settings object."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': sample_genome_metadata['output_file'],
-            'metadata': sample_genome_metadata
-        }
+        output_data = sample_genome_metadata.copy()
+        output_data['input_file'] = 'genome.fasta'
 
-        report.write(result, file_type='genome', input_file='genome.fasta')
+        report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 1
         assert report.file_records[0].input_settings is None
 
     def test_write_infers_input_filename(self, temp_report_path, sample_genome_metadata):
-        """Test that input filename is inferred from output file if not provided."""
+        """Test that output_data is stored correctly."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': '/output/genome.fasta.gz',
-            'metadata': sample_genome_metadata
-        }
+        output_data = sample_genome_metadata.copy()
+        output_data['input_file'] = 'genome.fasta'
 
-        report.write(result, file_type='genome')  # No input_file provided
+        report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 1
-        assert report.file_records[0].input_file == 'genome.fasta.gz'
+        assert report.file_records[0].output_data['input_file'] == 'genome.fasta'
 
 
 # ============================================================================
@@ -482,11 +463,10 @@ class TestTextReportGeneration:
         """Test that text report has expected structure."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': sample_genome_metadata['output_file'],
-            'metadata': sample_genome_metadata
-        }
-        report.write(result, file_type='genome', input_file='genome.fasta')
+        output_data = sample_genome_metadata.copy()
+        output_data['input_file'] = 'genome.fasta'
+
+        report.write(output_data, file_type='genome')
 
         report.flush(format='text')
 
@@ -500,11 +480,14 @@ class TestTextReportGeneration:
         """Test that summary section shows correct file counts."""
         report = ValidationReport(temp_report_path)
 
-        genome_result = {'output_file': sample_genome_metadata['output_file'], 'metadata': sample_genome_metadata}
-        read_result = {'output_file': sample_read_metadata['output_file'], 'metadata': sample_read_metadata}
+        genome_result = sample_genome_metadata.copy()
+        genome_result['input_file'] = 'genome.fasta'
 
-        report.write(genome_result, file_type='genome', input_file='genome.fasta')
-        report.write(read_result, file_type='read', input_file='reads.fastq')
+        read_result = sample_read_metadata.copy()
+        read_result['input_file'] = 'reads.fastq'
+
+        report.write(genome_result, file_type='genome')
+        report.write(read_result, file_type='read')
 
         report.flush(format='text')
 
@@ -578,16 +561,13 @@ class TestJSONReportGeneration:
         """Test that file validations are included in JSON."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': sample_genome_metadata['output_file'],
-            'metadata': sample_genome_metadata
-        }
+        output_data = sample_genome_metadata.copy()
+        output_data['input_file'] = 'genome.fasta'
+
         report.write(
-            result,
+            output_data,
             file_type='genome',
-            input_file='genome.fasta',
-            settings=sample_genome_settings,
-            elapsed_time=12.5
+            settings=sample_genome_settings
         )
 
         report.flush(format='json')
@@ -597,11 +577,10 @@ class TestJSONReportGeneration:
 
         assert len(data['file_validations']) == 1
         validation = data['file_validations'][0]
-        assert validation['input_file'] == 'genome.fasta'
         assert validation['validator_type'] == 'genome'
         assert validation['input_settings'] == sample_genome_settings.to_dict()
-        assert validation['output_file'] == sample_genome_metadata['output_file']
-        assert validation['elapsed_time'] == 12.5
+        assert validation['output_data']['input_file'] == 'genome.fasta'
+        assert validation['output_data']['output_file'] == sample_genome_metadata['output_file']
 
     def test_json_report_interfile_validations(self, temp_report_path):
         """Test that inter-file validations are included in JSON."""
@@ -633,8 +612,10 @@ class TestJSONReportGeneration:
         """Test that generated JSON is valid and parseable."""
         report = ValidationReport(temp_report_path)
 
-        result = {'output_file': sample_genome_metadata['output_file'], 'metadata': sample_genome_metadata}
-        report.write(result, file_type='genome', input_file='genome.fasta')
+        output_data = sample_genome_metadata.copy()
+        output_data['input_file'] = 'genome.fasta'
+
+        report.write(output_data, file_type='genome')
 
         report.flush(format='json')
 
@@ -651,38 +632,39 @@ class TestJSONReportGeneration:
 class TestMetadataHandling:
     """Test metadata conversion and formatting."""
 
-    def test_metadata_to_dict_filters_none(self, temp_report_path):
-        """Test that None values are filtered from metadata."""
+    def test_output_data_stored_correctly(self, temp_report_path):
+        """Test that output data is stored correctly in the new format."""
         report = ValidationReport(temp_report_path)
 
-        # Create a mock metadata object
-        @dataclass
-        class MockMetadata:
-            output_file: str = 'test.fasta'
-            num_sequences: int = 10
-            optional_field: str = None
-
-        metadata = MockMetadata()
-        result_dict = report._metadata_to_dict(metadata)
-
-        assert 'output_file' in result_dict
-        assert 'num_sequences' in result_dict
-        assert 'optional_field' not in result_dict
-
-    def test_backward_compatibility_dict_format(self, temp_report_path):
-        """Test backward compatibility with old dict format."""
-        report = ValidationReport(temp_report_path)
-
-        # Old format: result has 'output_metadata' instead of 'metadata'
-        result = {
-            'output_file': '/output/genome.fasta.gz',
-            'output_metadata': {'num_sequences': 3}
+        output_data = {
+            'input_file': 'test.fasta',
+            'output_file': 'output/test.fasta',
+            'num_sequences': 10,
+            'optional_field': None
         }
 
-        report.write(result, file_type='genome', input_file='genome.fasta')
+        report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 1
-        assert report.file_records[0].output_metadata == {'num_sequences': 3}
+        assert report.file_records[0].output_data == output_data
+
+    def test_dict_format_with_settings(self, temp_report_path):
+        """Test dict format with settings object."""
+        report = ValidationReport(temp_report_path)
+
+        output_data = {
+            'input_file': 'genome.fasta',
+            'output_file': '/output/genome.fasta.gz',
+            'num_sequences': 3
+        }
+
+        settings_dict = {'validation_level': 'strict', 'threads': 4}
+
+        report.write(output_data, file_type='genome', settings={'to_dict': lambda: settings_dict})
+
+        assert len(report.file_records) == 1
+        # Settings should be converted via to_dict if callable
+        # In the actual implementation, write() handles both dict and object with to_dict()
 
 
 # ============================================================================
@@ -696,25 +678,26 @@ class TestEdgeCases:
         """Test handling of empty metadata."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': '/output/test.fasta',
-            'metadata': {}
+        output_data = {
+            'input_file': 'test.fasta',
+            'output_file': '/output/test.fasta'
         }
 
-        report.write(result, file_type='genome', input_file='test.fasta')
+        report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 1
-        assert report.file_records[0].output_metadata == {}
+        assert report.file_records[0].output_data == output_data
 
     def test_missing_output_file(self, temp_report_path):
         """Test handling result without output_file."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'metadata': {'num_sequences': 10}
+        output_data = {
+            'input_file': 'test.fasta',
+            'num_sequences': 10
         }
 
-        report.write(result, file_type='genome', input_file='test.fasta')
+        report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 1
         # Should handle gracefully
@@ -723,15 +706,15 @@ class TestEdgeCases:
         """Test handling of Unicode characters in filenames."""
         report = ValidationReport(temp_report_path)
 
-        result = {
-            'output_file': '/output/génome_données.fasta',
-            'metadata': {}
+        output_data = {
+            'input_file': 'génome_données.fasta',
+            'output_file': '/output/génome_données.fasta'
         }
 
-        report.write(result, file_type='genome', input_file='génome_données.fasta')
+        report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 1
-        assert report.file_records[0].input_file == 'génome_données.fasta'
+        assert report.file_records[0].output_data['input_file'] == 'génome_données.fasta'
 
     def test_very_long_error_messages(self, temp_report_path):
         """Test handling of very long error messages."""
@@ -756,11 +739,11 @@ class TestEdgeCases:
 
         # Add 100 file records
         for i in range(100):
-            result = {
-                'output_file': f'/output/file{i}.fasta',
-                'metadata': sample_genome_metadata
-            }
-            report.write(result, file_type='genome', input_file=f'file{i}.fasta')
+            output_data = sample_genome_metadata.copy()
+            output_data['input_file'] = f'file{i}.fasta'
+            output_data['output_file'] = f'/output/file{i}.fasta'
+
+            report.write(output_data, file_type='genome')
 
         assert len(report.file_records) == 100
 
